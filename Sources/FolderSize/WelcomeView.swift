@@ -9,10 +9,10 @@ struct WelcomeView: View {
                 .font(.system(size: 52))
                 .foregroundStyle(Color.accentColor.opacity(0.85))
 
-            Text("文件夹大小")
+            Text(L.t("welcome.title"))
                 .font(.title.bold())
 
-            Text("统计任意文件夹中每个子文件夹与文件的大小占用,\n边扫描边出结果。")
+            Text(L.t("welcome.subtitle"))
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -20,16 +20,17 @@ struct WelcomeView: View {
             Button {
                 store.pickFolder()
             } label: {
-                Label("选择文件夹…", systemImage: "folder.badge.plus")
+                Label(L.t("welcome.pick"), systemImage: "folder.badge.plus")
                     .padding(.horizontal, 6)
             }
             .buttonStyle(.borderedProminent)
             .keyboardShortcut("o", modifiers: .command)
+            .help(L.tip("welcome.pick"))
 
             dropZone
 
             HStack(spacing: 8) {
-                Text("快速开始:")
+                Text(L.t("welcome.quickStart"))
                     .font(.callout)
                     .foregroundStyle(.secondary)
                 ForEach(Locations.quick().prefix(5)) { item in
@@ -37,6 +38,7 @@ struct WelcomeView: View {
                         store.openForBrowse(at: item.url)
                     }
                     .controlSize(.small)
+                    .help(item.url.path)
                 }
             }
         }
@@ -50,7 +52,7 @@ struct WelcomeView: View {
                 .fill(.quaternary.opacity(0.4))
             RoundedRectangle(cornerRadius: 12)
                 .strokeBorder(.quaternary, style: StrokeStyle(lineWidth: 1.5, dash: [5, 3]))
-            Label("或将文件夹拖到此处", systemImage: "arrow.down.doc")
+            Label(L.t("welcome.drop"), systemImage: "arrow.down.doc")
                 .foregroundStyle(.secondary)
         }
         .frame(width: 360, height: 110)

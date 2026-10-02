@@ -105,12 +105,12 @@ struct LauncherMenuItems: View {
         Button {
             NSWorkspace.shared.activateFileViewerSelecting([url])
         } label: {
-            Label("在访达中显示", systemImage: "folder")
+            Label(L.t("tree.reveal"), systemImage: "folder")
         }
         Button {
             LauncherStore.openTerminal(at: url)
         } label: {
-            Label("在终端中打开", systemImage: "terminal")
+            Label(L.t("tree.openTerminal"), systemImage: "terminal")
         }
         if !launchers.customs.isEmpty {
             Divider()
@@ -121,14 +121,14 @@ struct LauncherMenuItems: View {
             }
         }
         Divider()
-        Button("添加自定义启动器…") {
-            if let name = promptText("添加启动器", "显示名,如:cmux / VS Code / iTerm"),
-               let command = promptText("启动命令", "在目标目录执行的命令;{path} 代表目录路径") {
+        Button(L.t("launch.add")) {
+            if let name = promptText(L.t("launch.add.name"), L.t("launch.add.name.ph")),
+               let command = promptText(L.t("launch.add.cmd"), L.t("launch.add.cmd.ph")) {
                 launchers.add(name: name, command: command)
             }
         }
         if !launchers.customs.isEmpty {
-            Menu("移除启动器…") {
+            Menu(L.t("launch.remove")) {
                 ForEach(launchers.customs) { launcher in
                     Button(launcher.name, role: .destructive) {
                         launchers.remove(id: launcher.id)

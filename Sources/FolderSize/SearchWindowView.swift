@@ -38,7 +38,7 @@ struct SearchWindowView: View {
             content
         }
         .frame(minWidth: 680, minHeight: 400)
-        .navigationTitle("搜索 — \(scope.scopeName)")
+        .navigationTitle(L.f("search.title", scope.scopeName))
         .onAppear {
             AppFocus.activateApp(context: "搜索窗口")
             Diag.log("窗口出现 scope=\(scope.absolutePath)")
@@ -55,7 +55,7 @@ struct SearchWindowView: View {
         }
         .background {
             // Esc 收起示例面板
-            Button("收起") { showExamples = false }
+            Button(L.t("search.collapse")) { showExamples = false }
                 .keyboardShortcut(.cancelAction)
                 .opacity(0)
                 .frame(width: 0, height: 0)
@@ -82,7 +82,7 @@ struct SearchWindowView: View {
                 Image(systemName: "doc.on.doc")
             }
             .buttonStyle(.borderless)
-            .help("拷贝此路径")
+            .help(L.tip("search.copyPath"))
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
@@ -104,7 +104,7 @@ struct SearchWindowView: View {
                 }
                 .buttonStyle(.borderless)
                 .foregroundStyle(.secondary)
-                .help("清空关键词")
+                .help(L.tip("search.clear"))
             }
         }
         .padding(.horizontal, 10)
@@ -123,16 +123,16 @@ struct SearchWindowView: View {
                         showExamples.toggle()
                     }
                 } label: {
-                    Label("搜索示例", systemImage: showExamples ? "chevron.up" : "chevron.down")
+                    Label(L.t("search.examples"), systemImage: showExamples ? "chevron.up" : "chevron.down")
                         .font(.callout)
                         .padding(.horizontal, 9)
                         .padding(.vertical, 3)
                         .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 6))
                 }
                 .buttonStyle(.plain)
-                .help("浮出面板展示各种搜索场景示例,点击即用")
+                .help(L.tip("search.examples"))
 
-                Text("语法:多词空格 = AND · *.通配符 · ext:扩展名 · size:>10mb · size:<1gb · folder: 只看文件夹")
+                Text(L.t("search.syntax"))
                     .font(.caption)
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
@@ -169,16 +169,16 @@ struct SearchWindowView: View {
     @ViewBuilder
     private var content: some View {
         if !scopeValid {
-            hint("根目录已变更(\(scope.rootPath))\n请回到主窗口重新打开搜索")
+            hint(L.f("search.rootChanged", scope.rootPath))
         } else if store.browseOnly && store.indexCount == 0 && !store.isScanning {
-            hint("浏览模式未统计,还没有可搜索的索引\n回主窗口点「统计大小」后即可全文搜索")
+            hint(L.t("search.needIndex"))
         } else if queryTrimmed.isEmpty {
-            hint("点\"搜索示例\"浮出面板参考写法,或直接输入关键词\n空格分隔多个关键词(AND),按相对路径匹配,输入即出结果")
+            hint(L.t("search.browseHint"))
         } else if result.isEmpty {
-            hint(store.isScanning ? "搜索中…" : "没有匹配项")
+            hint(store.isScanning ? L.t("search.searching") : L.t("search.noMatch"))
         } else {
             Table(result, selection: $selection) {
-                TableColumn("名称") { rec in
+                TableColumn(L.t("col.name")) { rec in
                     HStack(spacing: 6) {
                         Image(systemName: rec.isDirectory ? "folder.fill" : "doc")
                             .foregroundStyle(rec.isDirectory ? Color.accentColor : .secondary)
@@ -189,13 +189,13 @@ struct SearchWindowView: View {
                     .contextMenu { rowMenu(rec) }
                     .help(rec.relPath)
                 }
-                TableColumn("所在文件夹") { rec in
+                TableColumn(L.t("search.col.parent")) { rec in
                     Text(rec.parentPath)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .truncationMode(.head)
                 }
-                TableColumn("大小") { rec in
+                TableColumn(L.t("col.size")) { rec in
                     Text(rec.isDirectory ? "—" : Format.size(rec.logical))
                         .monospacedDigit()
                 }
@@ -219,18 +219,18 @@ struct SearchWindowView: View {
 
     private var footer: some View {
         HStack(spacing: 10) {
-            Text("命中 \(Format.count(totalHits)) 条"
-                + (totalHits > displayCap ? "(显示前 \(Format.count(displayCap)))" : ""))
+            Text(L.f("search.hits", Format.count(totalHits))
+                + (totalHits > displayCap ? L.f("search.hitsCapped", Format.count(displayCap)) : ""))
             Text("\(searchMillis) ms")
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
 
             Spacer()
 
-            Text("排序")
+            Text(L.t("search.sort"))
                 .foregroundStyle(.secondary)
-            Picker("排序", selection: $sortKey) {
-                ForEach(SortKey.allCases) { Text($0.rawValue).tag($0) }
+            Picker(L.t("search.sort"), selection: $sortKey) {
+                ForEach(SortKey.allCases) { Text(L.t($0.titleID)).tag($0) }
             }
             .pickerStyle(.segmented)
             .labelsHidden()
@@ -241,18 +241,18 @@ struct SearchWindowView: View {
                 Image(systemName: descending ? "arrow.down" : "arrow.up")
             }
             .buttonStyle(.borderless)
-            .help(descending ? "当前降序" : "当前升序")
+            .help(descending ? L.tip("sort.desc") : L.tip("sort.asc"))
 
-            Text("索引 \(Format.count(store.indexCount)) 项")
+            Text(L.f("search.indexCount", Format.count(store.indexCount)))
                 .foregroundStyle(.secondary)
             if store.isScanning {
                 ProgressView()
                     .controlSize(.mini)
             }
             if let cached = store.loadedFromCache {
-                Label("缓存", systemImage: "clock.arrow.circlepath")
+                Label(L.t("search.cache"), systemImage: "clock.arrow.circlepath")
                     .foregroundStyle(.secondary)
-                    .help("索引来自本地缓存,保存于 \(Format.time(cached))")
+                    .help(L.f("search.cache.tip", Format.time(cached)))
             }
         }
         .font(.callout)
@@ -327,7 +327,7 @@ private struct ExamplesPanel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text("点击示例填入搜索框(覆盖常用场景):")
+                Text(L.t("search.examplesTitle"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Spacer()
@@ -338,7 +338,7 @@ private struct ExamplesPanel: View {
                 }
                 .buttonStyle(.borderless)
                 .foregroundStyle(.secondary)
-                .help("收起")
+                .help(L.tip("search.collapse"))
             }
 
             ScrollView {
@@ -351,7 +351,7 @@ private struct ExamplesPanel: View {
                     if !history.isEmpty {
                         Divider()
                             .padding(.vertical, 4)
-                        Text("最近搜索:")
+                        Text(L.t("search.recent"))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         ForEach(history, id: \.self) { q in
@@ -428,7 +428,7 @@ struct SearchField: NSViewRepresentable {
 
     func makeNSView(context: Context) -> NSTextField {
         let field = NSTextField()
-        field.placeholderString = "输入关键词,例如:png / *.pdf / size:>100mb / folder:"
+        field.placeholderString = L.t("search.placeholder")
         field.bezelStyle = .roundedBezel
         field.font = .systemFont(ofSize: 13)
         field.usesSingleLineMode = true

@@ -2,9 +2,12 @@ import SwiftUI
 import AppKit
 
 enum DetailTab: String, CaseIterable, Identifiable {
-    case breakdown = "构成"
-    case topFiles = "最大文件"
+    case breakdown
+    case topFiles
     var id: String { rawValue }
+    var title: String {
+        L.t(self == .breakdown ? "detail.tab.breakdown" : "detail.tab.topFiles")
+    }
 }
 
 struct DetailPanel: View {
@@ -27,7 +30,9 @@ struct DetailPanel: View {
             Divider()
 
             Picker("视图", selection: $tab) {
-                ForEach(DetailTab.allCases) { Text($0.rawValue).tag($0) }
+                ForEach(DetailTab.allCases) { t in
+                    Text(t.title).tag(t)
+                }
             }
             .pickerStyle(.segmented)
             .labelsHidden()
@@ -66,20 +71,23 @@ struct DetailPanel: View {
                 Button {
                     NSWorkspace.shared.activateFileViewerSelecting([node.url])
                 } label: {
-                    Label("Finder", systemImage: "magnifyingglass")
+                    Label(L.t("detail.finder"), systemImage: "magnifyingglass")
                 }
+                .help(L.tip("tree.reveal"))
                 Button {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(node.url.path, forType: .string)
                 } label: {
-                    Label("拷贝路径", systemImage: "doc.on.doc")
+                    Label(L.t("detail.copyPath"), systemImage: "doc.on.doc")
                 }
+                .help(L.tip("tree.copyPath"))
                 Button {
                     store.startScan(at: node.url, preferCache: false)
                 } label: {
-                    Label("设为根", systemImage: "arrow.down.circle")
+                    Label(L.t("detail.setRoot"), systemImage: "arrow.down.circle")
                 }
                 .disabled(store.isScanning)
+                .help(L.tip("detail.setRoot"))
                 Button {
                     if let rootURL = store.root?.url {
                         openWindow(value: SearchScope(
@@ -90,15 +98,16 @@ struct DetailPanel: View {
                     }
                 } label: {
                     // 与工具栏搜索按钮一致的蓝色胶囊强调
-                    Label("搜索", systemImage: "magnifyingglass")
+                    Label(L.t("detail.search"), systemImage: "magnifyingglass")
                         .font(.callout.weight(.medium))
                         .foregroundStyle(.white)
+                        .fixedSize() // 按钮行窄,防止文字换行
                         .padding(.horizontal, 9)
                         .padding(.vertical, 3)
                         .background(Color.blue, in: Capsule())
                 }
                 .buttonStyle(.plain)
-                .help("打开 Everything 式搜索窗口,范围限定此文件夹")
+                .help(L.tip("detail.search"))
             }
             .controlSize(.small)
         }
@@ -109,11 +118,11 @@ struct DetailPanel: View {
     private var statsGrid: some View {
         let columns = [GridItem(.flexible()), GridItem(.flexible())]
         return LazyVGrid(columns: columns, alignment: .leading, spacing: 8) {
-            stat("逻辑大小", Format.size(node.logical))
-            stat("磁盘占用", Format.size(node.allocated))
-            stat("文件数", Format.count(node.files))
-            stat("子文件夹", Format.count(node.dirs))
-            stat("占根目录", Format.percent(node.size(store.sizeMode), of: rootTotal))
+            stat(L.t("detail.logical"), Format.size(node.logical))
+            stat(L.t("detail.allocated"), Format.size(node.allocated))
+            stat(L.t("detail.fileCount"), Format.count(node.files))
+            stat(L.t("detail.dirCount"), Format.count(node.dirs))
+            stat(L.t("detail.ofRoot"), Format.percent(node.size(store.sizeMode), of: rootTotal))
         }
     }
 
@@ -144,7 +153,7 @@ struct DetailPanel: View {
         let rest = node.size(mode) - shown
         if rest > 0 {
             result.append(PieSlice(
-                name: "其他(\(node.dirs - kids.count) 项 + 文件)",
+                name: L.f("detail.other", node.dirs - kids.count),
                 value: rest,
                 color: Color.dynamic(Viz.other.light, Viz.other.dark)
             ))
@@ -158,17 +167,17 @@ struct DetailPanel: View {
                 VStack(spacing: 6) {
                     Image(systemName: "eye")
                         .foregroundStyle(.secondary)
-                    Text("浏览模式:未统计大小")
+                    Text(L.t("detail.browseHint"))
                         .font(.callout)
                         .foregroundStyle(.secondary)
-                    Text("点树表右上「统计大小」开始")
+                    Text(L.t("detail.browseHint2"))
                         .font(.caption)
                         .foregroundStyle(.tertiary)
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.top, 40)
             } else if node.sorted.isEmpty {
-                Text("此文件夹没有子文件夹")
+                Text(L.t("detail.noSubfolders"))
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity)
@@ -210,7 +219,7 @@ struct DetailPanel: View {
     private var topFilesList: some View {
         Group {
             if store.topFiles.isEmpty {
-                Text(store.isScanning ? "正在收集…" : "暂无数据")
+                Text(store.isScanning ? L.t("detail.collecting") : L.t("detail.nodata"))
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity)
@@ -236,7 +245,7 @@ struct DetailPanel: View {
                     .contextMenu {
                         if let rootURL = store.root?.url {
                             let url = rootURL.appendingPathComponent(hit.path)
-                            Button("在 Finder 中显示") {
+                            Button(L.t("tree.reveal")) {
                                 NSWorkspace.shared.activateFileViewerSelecting([url])
                             }
                         }

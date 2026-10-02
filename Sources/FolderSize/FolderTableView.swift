@@ -26,18 +26,19 @@ struct FolderSplitView: View {
     /// 浏览模式提示条:点「统计大小」才开始统计
     private var browseBar: some View {
         HStack(spacing: 10) {
-            Label("浏览模式:未统计大小(文件夹显示直接数量,文件显示自身大小)", systemImage: "eye")
+            Label(L.t("browse.bar"), systemImage: "eye")
                 .font(.callout)
                 .foregroundStyle(.secondary)
             Spacer()
             Button {
                 if let url = store.root?.url { store.startScan(at: url) }
             } label: {
-                Label("统计大小", systemImage: "chart.bar.fill")
+                Label(L.t("browse.scan"), systemImage: "chart.bar.fill")
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.small)
             .keyboardShortcut("r", modifiers: .command)
+            .help(L.tip("browse.scan"))
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 5)
@@ -68,21 +69,21 @@ struct FolderTableView: NSViewRepresentable {
         outline.autoresizesOutlineColumn = true
 
         let name = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("name"))
-        name.title = "名称"
+        name.title = L.t("col.name")
         name.width = 280
-        name.minWidth = 160
-        name.resizingMask = .autoresizingMask
+        name.minWidth = 120
+        name.resizingMask = [.autoresizingMask, .userResizingMask] // 随窗口拉伸,也可手动拖窄
         outline.addTableColumn(name)
         outline.outlineTableColumn = name
 
-        for (id, title, width, minWidth) in [
-            ("size", "大小", CGFloat(96), CGFloat(88)),
-            ("percent", "占比", CGFloat(62), CGFloat(56)),
-            ("files", "文件", CGFloat(62), CGFloat(56)),
-            ("dirs", "文件夹", CGFloat(70), CGFloat(62)),
+        for (id, colID, width, minWidth) in [
+            ("size", "col.size", CGFloat(96), CGFloat(88)),
+            ("percent", "col.percent", CGFloat(62), CGFloat(56)),
+            ("files", "col.files", CGFloat(62), CGFloat(56)),
+            ("dirs", "col.dirs", CGFloat(70), CGFloat(62)),
         ] {
             let col = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(id))
-            col.title = title
+            col.title = L.t(colID)
             col.width = width
             col.minWidth = minWidth
             col.resizingMask = .userResizingMask
@@ -120,6 +121,7 @@ struct FolderTableView: NSViewRepresentable {
         var parent: FolderTableView
         weak var outline: NSOutlineView?
         private var lastRootID: UUID?
+        private var lastReload = Date.distantPast
 
         init(_ parent: FolderTableView) { self.parent = parent }
 
@@ -182,7 +184,7 @@ struct FolderTableView: NSViewRepresentable {
         func outlineView(_ outline: NSOutlineView, toolTipFor cell: NSView, rect: NSRectPointer,
                          tableColumn: NSTableColumn?, item: Any, mouseLocation: NSPoint) -> String {
             guard let node = item as? Node else { return "" }
-            return store.browseOnly ? node.url.path + "(浏览模式,未统计大小)" : node.url.path
+            return store.browseOnly ? node.url.path + L.t("tree.browseNote.tip") : node.url.path
         }
 
         private func percent(of node: Node) -> String {
@@ -253,14 +255,13 @@ struct FolderTableView: NSViewRepresentable {
         // MARK: 刷新与选中同步
 
         /// store 每次 objectWillChange 都会走 updateNSView;reloadData 按
-        /// Node 引用保留展开状态,统计进行中的增量刷新与浏览懒加载都能即时反映
+        /// Node 引用保留展开状态。扫描进行中按 0.15s 节流,避免高频刷新
+        /// 打断用户展开/选中交互(展开箭头扫描期间照样可点)
         func syncData() {
             guard let outline else { return }
-            if lastRootID != parent.root.id {
-                lastRootID = parent.root.id
-                outline.reloadData()
-                return
-            }
+            let now = Date()
+            if store.isScanning, now.timeIntervalSince(lastReload) < 0.15 { return }
+            lastReload = now
             outline.reloadData()
         }
 
@@ -327,10 +328,10 @@ enum FolderTreeMenuBuilder {
         openSearch: @escaping () -> Void
     ) {
         // 打开方式
-        menu.addItem(item("在访达中显示") {
+        menu.addItem(item(L.t("tree.reveal")) {
             NSWorkspace.shared.activateFileViewerSelecting([node.url])
         })
-        menu.addItem(item("在终端中打开") {
+        menu.addItem(item(L.t("tree.openTerminal")) {
             LauncherStore.openTerminal(at: node.url)
         })
         for launcher in launchers.customs {
@@ -339,25 +340,25 @@ enum FolderTreeMenuBuilder {
             })
         }
         if !launchers.customs.isEmpty { menu.addItem(.separator()) }
-        menu.addItem(item("添加自定义启动器…") {
-            if let name = promptText("添加启动器", "显示名,如:cmux / VS Code / iTerm"),
-               let command = promptText("启动命令", "在目标目录执行的命令;{path} 代表目录路径") {
+        menu.addItem(item(L.t("launch.add")) {
+            if let name = promptText(L.t("launch.add.name"), L.t("launch.add.name.ph")),
+               let command = promptText(L.t("launch.add.cmd"), L.t("launch.add.cmd.ph")) {
                 launchers.add(name: name, command: command)
             }
         })
         if !launchers.customs.isEmpty {
-            let remove = NSMenu(title: "移除启动器…")
+            let remove = NSMenu(title: L.t("launch.remove"))
             for launcher in launchers.customs {
                 remove.addItem(item(launcher.name) { launchers.remove(id: launcher.id) })
             }
-            let removeItem = NSMenuItem(title: "移除启动器…", action: nil, keyEquivalent: "")
+            let removeItem = NSMenuItem(title: L.t("launch.remove"), action: nil, keyEquivalent: "")
             removeItem.submenu = remove
             menu.addItem(removeItem)
         }
 
         // 收藏夹
-        let fav = NSMenu(title: "添加到收藏夹")
-        fav.addItem(item("收藏到顶层") {
+        let fav = NSMenu(title: L.t("fav.add"))
+        fav.addItem(item(L.t("fav.addTop")) {
             favorites.addFolder(name: node.name, path: node.url.path, into: nil)
         })
         for cat in favorites.categories() {
@@ -366,28 +367,28 @@ enum FolderTreeMenuBuilder {
             })
         }
         fav.addItem(.separator())
-        fav.addItem(item("新建分类…") {
-            if let name = promptText("新建分类", "分类名称,如:工作 / 视频"),
+        fav.addItem(item(L.t("fav.newCategory")) {
+            if let name = promptText(L.t("fav.newCategory"), L.t("fav.newCategory.ph")),
                let newID = favorites.addCategory(named: name, into: nil) {
                 favorites.addFolder(name: node.name, path: node.url.path, into: newID)
             }
         })
-        let favItem = NSMenuItem(title: "添加到收藏夹", action: nil, keyEquivalent: "")
+        let favItem = NSMenuItem(title: L.t("fav.add"), action: nil, keyEquivalent: "")
         favItem.submenu = fav
         menu.addItem(favItem)
 
         // 其他
-        menu.addItem(item("在此文件夹中搜索…") { openSearch() })
-        menu.addItem(item("拷贝路径") {
+        menu.addItem(item(L.t("tree.search")) { openSearch() })
+        menu.addItem(item(L.t("tree.copyPath")) {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(node.url.path, forType: .string)
         })
         menu.addItem(.separator())
         if !node.isFile {
-            menu.addItem(item("进入此文件夹(浏览)") {
+            menu.addItem(item(L.t("tree.enter")) {
                 store.openForBrowse(at: node.url)
             })
-            menu.addItem(item(store.browseOnly ? "统计此文件夹大小" : "以此文件夹为根重新扫描") {
+            menu.addItem(item(store.browseOnly ? L.t("tree.sizeThis") : L.t("tree.rescanRoot")) {
                 store.startScan(at: node.url)
             })
         }

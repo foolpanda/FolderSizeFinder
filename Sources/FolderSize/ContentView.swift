@@ -24,22 +24,39 @@ struct ContentView: View {
             }
         }
         .toolbar {
-            ToolbarItemGroup {
+            // 每个 ToolbarItem 独立声明,让 AppKit 使用标准工具栏间距,避免控件粘连
+            ToolbarItem {
                 Button {
                     store.pickFolder()
                 } label: {
-                    Label("选择文件夹…", systemImage: "folder.badge.plus")
+                    Label(L.t("toolbar.pickFolder"), systemImage: "folder.badge.plus")
                 }
                 .keyboardShortcut("o", modifiers: .command)
+                .help(L.tip("toolbar.pickFolder"))
+            }
 
-                Button {
-                    if let url = store.root?.url { store.startScan(at: url, preferCache: false) }
-                } label: {
-                    Label("重新扫描", systemImage: "arrow.clockwise")
+            ToolbarItem {
+                if store.isScanning {
+                    Button {
+                        store.cancelScan()
+                    } label: {
+                        Label(L.t("toolbar.stop"), systemImage: "stop.fill") // ‖
+                    }
+                    .keyboardShortcut(".", modifiers: .command)
+                    .help(L.tip("toolbar.stop"))
+                } else {
+                    Button {
+                        if let url = store.root?.url { store.startScan(at: url, preferCache: false) }
+                    } label: {
+                        Label(L.t("toolbar.rescan"), systemImage: "play.fill") // ⇒
+                    }
+                    .keyboardShortcut("r", modifiers: .command)
+                    .disabled(store.root == nil)
+                    .help(L.tip("toolbar.rescan"))
                 }
-                .keyboardShortcut("r", modifiers: .command)
-                .disabled(store.root == nil)
+            }
 
+            ToolbarItem {
                 Button {
                     if let root = store.root {
                         // 先激活 app 再开窗,避免窗口打开却拿不到键盘焦点
@@ -52,9 +69,10 @@ struct ContentView: View {
                     }
                 } label: {
                     // 工具栏会忽略 borderedProminent/tint,显式画蓝色胶囊保证强调效果
-                    Label("搜索", systemImage: "magnifyingglass")
+                    Label(L.t("toolbar.search"), systemImage: "magnifyingglass")
                         .font(.callout.weight(.medium))
                         .foregroundStyle(.white)
+                        .fixedSize() // 防止工具栏挤压导致文字换行
                         .padding(.horizontal, 10)
                         .padding(.vertical, 4)
                         .background(Color.blue, in: Capsule())
@@ -62,37 +80,33 @@ struct ContentView: View {
                 .buttonStyle(.plain)
                 .keyboardShortcut("f", modifiers: .command)
                 .disabled(store.root == nil)
+                .help(L.tip("toolbar.search"))
+            }
 
-                if store.isScanning {
-                    Button {
-                        store.cancelScan()
-                    } label: {
-                        Label("停止", systemImage: "stop.fill")
-                    }
-                    .keyboardShortcut(".", modifiers: .command)
-                }
-
-                ProgressView()
-                    .controlSize(.small)
-                    .opacity(store.isScanning ? 1 : 0)
-                    .help(store.isScanning ? "正在扫描" : "")
-
+            // 弹性撑开:左侧操作组靠左,统计控件靠右
+            ToolbarItem {
                 Spacer()
+                    .frame(minWidth: 12, maxWidth: .infinity)
+            }
 
+            ToolbarItem {
                 Picker("统计口径", selection: $store.sizeMode) {
                     ForEach(SizeMode.allCases) { mode in
-                        Text(mode.rawValue).tag(mode)
+                        Text(L.t(mode == .allocated ? "sizemode.allocated" : "sizemode.logical"))
+                            .tag(mode)
                     }
                 }
                 .pickerStyle(.segmented)
                 .frame(width: 190)
-                .help("磁盘占用 = 实际分配的块大小;逻辑大小 = 文件字节数")
+                .help(L.tip("toolbar.sizeMode"))
+            }
 
-                Toggle("隐藏文件", isOn: $store.includeHidden)
-                    .help("是否包含以 . 开头的隐藏文件(切换后重新扫描)")
+            ToolbarItem {
+                Toggle(L.t("toolbar.hiddenFiles"), isOn: $store.includeHidden)
+                    .help(L.tip("toolbar.hiddenFiles"))
             }
         }
-        .navigationTitle(store.root?.name ?? "文件夹大小")
+        .navigationTitle(store.root?.name ?? L.t("app.title"))
     }
 }
 
@@ -106,40 +120,45 @@ struct StatusBar: View {
             if store.isScanning {
                 ProgressView()
                     .controlSize(.mini)
-                Text(store.loadedFromCache == nil ? "正在扫描…" : "正在载入缓存…")
+                Text(store.loadedFromCache == nil ? L.t("status.scanning") : L.t("status.loadingCache"))
             } else if store.root != nil {
                 if store.browseOnly {
-                    Label("浏览模式 · 未统计大小", systemImage: "eye")
+                    Label(L.t("status.browse"), systemImage: "eye")
                         .foregroundStyle(.secondary)
                 } else if let cached = store.loadedFromCache {
-                    Label("已载入缓存", systemImage: "externaldrive.badge.clock")
+                    Label(L.t("status.cached"), systemImage: "externaldrive.badge.clock")
                         .foregroundStyle(.green)
-                        .help("数据来自本地索引缓存(保存于 \(Format.time(cached))。\n点击工具栏\"重新扫描\"获取最新数据。")
+                        .help(L.f("status.cached.tip", Format.time(cached)))
                 } else {
                     Image(systemName: store.wasCancelled ? "pause.circle" : "checkmark.circle.fill")
                         .foregroundStyle(.green)
-                    Text(store.wasCancelled ? "已停止" : "完成")
+                    Text(store.wasCancelled ? L.t("status.stopped") : L.t("status.done"))
                 }
             } else {
-                Text("未选择文件夹")
+                Text(L.t("status.noFolder"))
             }
 
             if store.browseOnly, let root = store.root {
-                Text("\(Format.count(root.sorted.count)) 个子文件夹 · 未统计")
+                Text(L.f("status.browseSummary", root.sorted.count))
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
             } else {
-                Text("\(Format.count(store.scannedFiles)) 个文件 · \(Format.size(store.scannedBytes)) · \(String(format: "%.1f s", store.elapsed))")
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
+                Text(L.f(
+                    "status.summary",
+                    Format.count(store.scannedFiles),
+                    Format.size(store.scannedBytes),
+                    store.elapsed
+                ))
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
             }
 
             Spacer()
 
             if store.errorCount > 0 {
-                Label("\(Format.count(store.errorCount)) 项无法读取", systemImage: "exclamationmark.triangle.fill")
+                Label(L.f("status.errors", Format.count(store.errorCount)), systemImage: "exclamationmark.triangle.fill")
                     .foregroundStyle(.orange)
-                    .help((store.lastError ?? "") + "\n(通常是无权限的系统目录)")
+                    .help(L.f("status.errors.tip", store.lastError ?? ""))
             }
 
             if let root = store.root {
@@ -153,7 +172,7 @@ struct StatusBar: View {
                     Image(systemName: "folder")
                 }
                 .buttonStyle(.borderless)
-                .help("在 Finder 中显示")
+                .help(L.tip("status.reveal"))
             }
         }
         .padding(.horizontal, 10)

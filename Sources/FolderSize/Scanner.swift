@@ -9,7 +9,7 @@ struct ScanEvent {
 }
 
 /// 后台目录扫描器:NSDirectoryEnumerator 深度优先(先序)遍历,
-/// 每累计 32768 条或 200ms 回传一批,由主线程增量建树。
+/// 每累计 8192 条或 200ms 回传一批,由主线程增量建树(小批保证主线程流畅,扫描中仍可展开/交互)。
 enum DirectoryScanner {
     final class ErrorBox: @unchecked Sendable {
         var count = 0
@@ -46,7 +46,7 @@ enum DirectoryScanner {
         }
 
         var batch: [ScanEvent] = []
-        batch.reserveCapacity(32768)
+        batch.reserveCapacity(8192)
         var lastFlush = DispatchTime.now().uptimeNanoseconds
 
         while let obj = enumerator.nextObject() {
@@ -65,7 +65,7 @@ enum DirectoryScanner {
                 allocated: allocated
             ))
 
-            if batch.count >= 32768 ||
+            if batch.count >= 8192 ||
                 (batch.count & 4095) == 0 && DispatchTime.now().uptimeNanoseconds &- lastFlush > 200_000_000 {
                 await onBatch(batch)
                 batch.removeAll(keepingCapacity: true)

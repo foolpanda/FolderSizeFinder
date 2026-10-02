@@ -125,30 +125,30 @@ struct SearchExample: Identifiable {
     let id = UUID()
     let display: String
     let query: String
-    let note: String
+    let noteKey: String   // L10n ID(example.note.*)
+    var note: String { L.t(noteKey) }
 }
 
 extension SearchExample {
     static let all: [SearchExample] = [
-        .init(display: "png", query: "png", note: "名称或路径包含 png(不区分大小写)"),
-        .init(display: "报告 2024", query: "报告 2024", note: "多关键词用空格分隔,需同时包含"),
-        .init(display: "*.pdf", query: "*.pdf", note: "按名称通配符匹配"),
-        .init(display: "ext:log", query: "ext:log", note: "按扩展名过滤(等同 *.log)"),
-        .init(display: "size:>100mb", query: "size:>100mb", note: "逻辑大小超过 100 MB 的文件"),
-        .init(display: "size:>10mb size:<100mb", query: "size:>10mb size:<100mb", note: "大小落在区间内"),
-        .init(display: "folder:", query: "folder:", note: "只列出文件夹"),
-        .init(display: "folder:node", query: "folder:node", note: "名字包含 node 的文件夹"),
-        .init(display: "mp4 size:>500mb", query: "mp4 size:>500mb", note: "关键词与条件自由组合"),
+        .init(display: "png", query: "png", noteKey: "example.note.1"),
+        .init(display: "报告 2024", query: "报告 2024", noteKey: "example.note.2"),
+        .init(display: "*.pdf", query: "*.pdf", noteKey: "example.note.3"),
+        .init(display: "ext:log", query: "ext:log", noteKey: "example.note.4"),
+        .init(display: "size:>100mb", query: "size:>100mb", noteKey: "example.note.5"),
+        .init(display: "size:>10mb size:<100mb", query: "size:>10mb size:<100mb", noteKey: "example.note.6"),
+        .init(display: "folder:", query: "folder:", noteKey: "example.note.7"),
+        .init(display: "folder:node", query: "folder:node", noteKey: "example.note.8"),
+        .init(display: "mp4 size:>500mb", query: "mp4 size:>500mb", noteKey: "example.note.9"),
     ]
 }
 
 // MARK: - 过滤
 
 enum SortKey: String, CaseIterable, Identifiable {
-    case name = "名称"
-    case size = "大小"
-    case path = "路径"
+    case name, size, path
     var id: String { rawValue }
+    var titleID: String { "sort." + rawValue }
 }
 
 /// 纯函数过滤器,便于测试

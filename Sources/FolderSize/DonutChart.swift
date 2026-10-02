@@ -49,14 +49,14 @@ struct DonutChart: View {
                 at: CGPoint(x: center.x, y: center.y - 8)
             )
             ctx.draw(
-                Text("合计")
+                Text(L.t("detail.total"))
                     .font(.system(size: 10))
                     .foregroundColor(.secondary),
                 at: CGPoint(x: center.x, y: center.y + 11)
             )
         }
         .frame(height: 180)
-        .accessibilityLabel("子文件夹大小构成环形图")
+        .accessibilityLabel(L.t("detail.donutA11y"))
     }
 }
 

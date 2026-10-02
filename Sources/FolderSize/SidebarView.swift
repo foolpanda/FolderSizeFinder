@@ -12,15 +12,15 @@ enum Locations {
         let fm = FileManager.default
         let home = fm.homeDirectoryForCurrentUser
         let candidates: [(String, String, URL)] = [
-            ("house", "主文件夹", home),
-            ("arrow.down.circle", "下载", home.appendingPathComponent("Downloads")),
-            ("doc", "文稿", home.appendingPathComponent("Documents")),
-            ("desktopcomputer", "桌面", home.appendingPathComponent("Desktop")),
-            ("app.gift", "应用程序", URL(fileURLWithPath: "/Applications")),
-            ("workspace", "工作区", home.appendingPathComponent("workspace")),
+            ("house", "loc.home", home),
+            ("arrow.down.circle", "loc.downloads", home.appendingPathComponent("Downloads")),
+            ("doc", "loc.documents", home.appendingPathComponent("Documents")),
+            ("desktopcomputer", "loc.desktop", home.appendingPathComponent("Desktop")),
+            ("app.gift", "loc.apps", URL(fileURLWithPath: "/Applications")),
+            ("workspace", "loc.workspace", home.appendingPathComponent("workspace")),
         ]
         return candidates.filter { fm.fileExists(atPath: $0.2.path) }.map {
-            QuickLocation(icon: $0.0, name: $0.1, url: $0.2)
+            QuickLocation(icon: $0.0, name: L.t($0.1), url: $0.2)
         }
     }
 
@@ -44,19 +44,19 @@ struct SidebarView: View {
 
     var body: some View {
         List {
-            Section("常用位置") {
+            Section(L.t("sidebar.quick")) {
                 ForEach(Locations.quick()) { item in
                     row(item)
                 }
             }
-            Section("卷") {
+            Section(L.t("sidebar.volumes")) {
                 ForEach(Locations.volumes()) { item in
                     row(item)
                 }
             }
             Section {
                 if favorites.roots.isEmpty {
-                    Text("在中间树列表右键文件夹\n→「添加到收藏夹」")
+                    Text(L.t("sidebar.favEmpty"))
                         .font(.caption)
                         .foregroundStyle(.tertiary)
                         .lineSpacing(3)
@@ -66,9 +66,9 @@ struct SidebarView: View {
                     }
                 }
             } header: {
-                Text("收藏夹").contextMenu {
-                    Button("新建分类…") {
-                        if let name = promptText("新建分类", "分类名称,如:工作 / 视频") {
+                Text(L.t("sidebar.favorites")).contextMenu {
+                    Button(L.t("fav.newCategory")) {
+                        if let name = promptText(L.t("fav.newCategory"), L.t("fav.newCategory.ph")) {
                             favorites.addCategory(named: name, into: nil)
                         }
                     }
@@ -146,10 +146,10 @@ private struct FavoriteBranch: View {
         guard let url = node.url else { return }
         guard FileManager.default.fileExists(atPath: url.path) else {
             let alert = NSAlert()
-            alert.messageText = "目录不存在或已移动"
+            alert.messageText = L.t("fav.missing")
             alert.informativeText = url.path
-            alert.addButton(withTitle: "从收藏夹删除")
-            alert.addButton(withTitle: "取消")
+            alert.addButton(withTitle: L.t("fav.delete"))
+            alert.addButton(withTitle: L.t("common.cancel"))
             if alert.runModal() == .alertFirstButtonReturn {
                 favorites.remove(id: node.id)
             }
@@ -166,21 +166,21 @@ private struct FavoriteBranch: View {
             LauncherMenuItems(url: url)
             Divider()
         }
-        Button("重命名…") {
-            if let name = promptText("重命名", "名称", initial: node.name) {
+        Button(L.t("fav.rename")) {
+            if let name = promptText(L.t("fav.rename.name"), L.t("fav.rename.ph"), initial: node.name) {
                 favorites.rename(id: node.id, to: name)
             }
         }
         if node.isCategory {
-            Button("新建子分类…") {
-                if let name = promptText("新建分类", "分类名称,如:工作 / 视频") {
+            Button(L.t("fav.newSub")) {
+                if let name = promptText(L.t("fav.newCategory"), L.t("fav.newCategory.ph")) {
                     favorites.addCategory(named: name, into: node.id)
                 }
             }
         }
         moveMenu
         Divider()
-        Button("从收藏夹删除", role: .destructive) {
+        Button(L.t("fav.delete"), role: .destructive) {
             favorites.remove(id: node.id)
         }
     }
@@ -188,14 +188,14 @@ private struct FavoriteBranch: View {
     /// 移动到分类子菜单:顶层 / 已有分类(带轨迹)/ 新建分类并移入
     @ViewBuilder
     private var moveMenu: some View {
-        Menu("移动到分类…") {
-            Button("顶层") { favorites.move(id: node.id, into: nil) }
+        Menu(L.t("fav.move")) {
+            Button(L.t("fav.top")) { favorites.move(id: node.id, into: nil) }
             ForEach(favorites.categories(excluding: node.id), id: \.id) { cat in
                 Button(cat.title) { favorites.move(id: node.id, into: cat.id) }
             }
             Divider()
-            Button("新建分类…") {
-                if let name = promptText("新建分类", "分类名称,如:工作 / 视频"),
+            Button(L.t("fav.newCategory")) {
+                if let name = promptText(L.t("fav.newCategory"), L.t("fav.newCategory.ph")),
                    let newID = favorites.addCategory(named: name, into: nil) {
                     favorites.move(id: node.id, into: newID)
                 }

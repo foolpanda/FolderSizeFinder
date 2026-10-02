@@ -55,7 +55,13 @@ final class ScanStore: ObservableObject {
         let args = CommandLine.arguments
         if let i = args.firstIndex(of: "--path"), i + 1 < args.count {
             let raw = (args[i + 1] as NSString).expandingTildeInPath
-            openForBrowse(at: URL(fileURLWithPath: raw))
+            let url = URL(fileURLWithPath: raw)
+            // --scan:启动即统计;默认浏览模式(秒开,不统计)
+            if args.contains("--scan") {
+                startScan(at: url)
+            } else {
+                openForBrowse(at: url)
+            }
         }
     }
 
@@ -196,7 +202,7 @@ final class ScanStore: ObservableObject {
         scanTask = Task.detached(priority: .userInitiated) { [weak self] in
             // 1) 有缓存:重放建树,秒出结果
             if preferCache, let cached = IndexCache.read(url: cacheURL) {
-                for chunk in cached.events.chunked(into: 65536) {
+                for chunk in cached.events.chunked(into: 8192) {
                     await self?.apply(chunk, generation: gen)
                 }
                 await self?.finish(
@@ -226,8 +232,8 @@ final class ScanStore: ObservableObject {
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = false
-        panel.message = "选择要打开的文件夹(打开后可再点「统计大小」)"
-        panel.prompt = "打开"
+        panel.message = L.t("openpanel.message")
+        panel.prompt = L.t("openpanel.prompt")
         if panel.runModal() == .OK, let url = panel.url {
             openForBrowse(at: url)
         }
@@ -244,7 +250,7 @@ final class ScanStore: ObservableObject {
                 return
             }
             await self?.reset(url: URL(fileURLWithPath: cached.rootPath))
-            for chunk in cached.events.chunked(into: 65536) {
+            for chunk in cached.events.chunked(into: 8192) {
                 await self?.apply(chunk, generation: gen)
             }
             await self?.finish(
