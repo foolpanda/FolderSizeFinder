@@ -51,10 +51,15 @@ struct ContentView: View {
                         ))
                     }
                 } label: {
+                    // 工具栏会忽略 borderedProminent/tint,显式画蓝色胶囊保证强调效果
                     Label("搜索", systemImage: "magnifyingglass")
+                        .font(.callout.weight(.medium))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
+                        .background(Color.blue, in: Capsule())
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(.blue)
+                .buttonStyle(.plain)
                 .keyboardShortcut("f", modifiers: .command)
                 .disabled(store.root == nil)
 
