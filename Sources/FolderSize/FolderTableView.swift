@@ -77,15 +77,13 @@ struct FolderTableView: View {
     @ViewBuilder
     private func menu(for node: Node) -> some View {
         addFavoriteMenu(node)
+        LauncherMenuItems(url: node.url)
         Button("在此文件夹中搜索…") {
             openWindow(value: SearchScope(
                 rootPath: root.url.path,
                 prefix: node.relPath,
                 scopeName: node.name
             ))
-        }
-        Button("在 Finder 中显示") {
-            NSWorkspace.shared.activateFileViewerSelecting([node.url])
         }
         Button("拷贝路径") {
             NSPasteboard.general.clearContents()

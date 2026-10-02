@@ -162,6 +162,10 @@ private struct FavoriteBranch: View {
 
     @ViewBuilder
     private var nodeMenu: some View {
+        if let url = node.url {
+            LauncherMenuItems(url: url)
+            Divider()
+        }
         Button("重命名…") {
             if let name = promptText("重命名", "名称", initial: node.name) {
                 favorites.rename(id: node.id, to: name)

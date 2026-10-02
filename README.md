@@ -24,6 +24,7 @@
 - **索引落盘**:完整扫描后自动保存二进制索引(`~/Library/Application Support/FolderSize/Indexes/*.fsidx`);再次打开同一目录**秒载缓存不再扫描**(状态栏显示"已载入缓存",点"重新扫描"刷新);另支持 文件菜单 → 导出索引…/打开索引… 交换 `.fsidx` 文件
 - **隐藏文件开关**、错误统计(无权限目录计数)、Finder 定位、拷贝路径、右键"设为根"重扫
 - **收藏夹**(侧栏"卷"下方):中间树列表右键文件夹 →「添加到收藏夹」(收藏到顶层 / 已有分类 / 新建分类)。类似 Chrome 收藏夹,支持**多级分类**整理:右键分类或收藏可 重命名 / 新建子分类 / 移动到分类(子菜单带层级轨迹)/ 删除(分类连同其下收藏);点击收藏即扫描(缓存优先),目录已失效时提示并可一键清理;收藏树与分类展开状态持久化,重启不丢
+- **打开方式 / 目录启动器**:收藏夹和树列表的右键菜单可直接 在访达中显示 / 在终端中打开(默认 Terminal.app),并支持**自定义启动器**——预置 `cmux`,可添加任意命令(如 VS Code、iTerm),命令在新终端窗口的目标目录下执行,`{path}` 代表目录路径;首次使用自定义启动器需授权"控制终端"
 - 拖拽文件夹到欢迎页、侧栏快速定位(主文件夹/下载/文稿/应用程序/各卷)
 - 支持命令行启动直达:`FolderSize --path ~/Downloads`
 
@@ -69,6 +70,7 @@ Sources/FolderSize/
 ├── SearchWindowView.swift # Everything 式搜索窗口
 ├── SearchSupport.swift    # FileRecord / SearchScope / 纯函数过滤器
 ├── Favorites.swift        # 收藏夹树(多级分类)+ UserDefaults 持久化
+├── Launchers.swift        # 目录启动器(访达 / 终端 / cmux 等自定义命令)
 ├── IndexCache.swift       # .fsidx 二进制索引读写
 ├── WelcomeView.swift      # 欢迎页(拖拽区)
 ├── ScanStore.swift        # 扫描状态机 + 增量建树 + 索引/缓存
