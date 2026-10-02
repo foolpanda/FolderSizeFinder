@@ -26,6 +26,18 @@ swift run FolderSize                 # 或 .build/debug/FolderSize
 .build/debug/FolderSize --path ~/Downloads
 ```
 
+> **终端启动的键盘焦点**:macOS 14 起 AppKit 改为"协作式激活",从前台终端拉起的进程
+> 默认拿不到键盘焦点(打字会进终端)。本应用已内置分级激活兜底(常规激活 →
+> 借前台应用 cooperative 让渡 → 激活策略翻转,见 `AppFocus.swift`);如仍遇到,
+> 可改用 LaunchServices 启动,激活由系统接管、无此问题(仅冷启动接收 `--args`):
+>
+> ```bash
+> open FolderSize.app --args --path ~/Downloads
+> ```
+>
+> 另注意:若终端开启了"安全键盘输入"(Terminal 菜单栏 显示 → 安全键盘输入),
+> 任何应用都无法从终端拿走键盘输入,需先取消勾选。
+
 ## 测试
 
 ```bash
@@ -37,6 +49,7 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test
 ```
 Sources/FolderSize/
 ├── FolderSizeApp.swift    # 入口 + 菜单命令 + 搜索窗口场景
+├── AppFocus.swift         # 分级激活:终端拉起时也要把键盘焦点抢回来
 ├── ContentView.swift      # 主布局、工具栏、状态栏
 ├── SidebarView.swift      # 快速位置 / 卷
 ├── FolderTableView.swift  # 层级 Table(HSplitView 左侧)

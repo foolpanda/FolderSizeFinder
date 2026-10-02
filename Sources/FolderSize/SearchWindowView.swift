@@ -40,7 +40,7 @@ struct SearchWindowView: View {
         .frame(minWidth: 680, minHeight: 400)
         .navigationTitle("搜索 — \(scope.scopeName)")
         .onAppear {
-            NSApp.activate(ignoringOtherApps: true)
+            AppFocus.activateApp(context: "搜索窗口")
             Diag.log("窗口出现 scope=\(scope.absolutePath)")
             runSearch()
         }
@@ -466,7 +466,9 @@ struct SearchField: NSViewRepresentable {
                 if attempt == 0 {
                     Diag.log("输入框挂载窗口: appActive=\(NSApp.isActive) keyWindow=\(window.isKeyWindow)")
                 }
-                NSApp.activate(ignoringOtherApps: true)
+                // 分级激活只在首次尝试时发起,重试轮询只负责补 makeKey/makeFirstResponder,
+                // 避免重试循环里反复叠加升级档位的激活请求
+                if attempt == 0 { AppFocus.activateApp(context: "搜索输入框") }
                 window.makeKeyAndOrderFront(nil)
                 let ok = window.makeFirstResponder(field)
                 if attempt == 0 {

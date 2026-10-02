@@ -43,7 +43,7 @@ struct ContentView: View {
                 Button {
                     if let root = store.root {
                         // 先激活 app 再开窗,避免窗口打开却拿不到键盘焦点
-                        NSApp.activate(ignoringOtherApps: true)
+                        AppFocus.activateApp(context: "搜索按钮")
                         openWindow(value: SearchScope(
                             rootPath: root.url.path,
                             prefix: "",

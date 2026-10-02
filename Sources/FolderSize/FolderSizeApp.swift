@@ -9,7 +9,7 @@ struct FolderSizeApp: App {
         WindowGroup("文件夹大小") {
             ContentView(store: store)
                 .environmentObject(store)
-                .onAppear { NSApp.activate(ignoringOtherApps: true) }
+                .onAppear { AppFocus.activateApp(context: "主窗口") }
         }
         .commands {
             CommandGroup(replacing: .newItem) {
