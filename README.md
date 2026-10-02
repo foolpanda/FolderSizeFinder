@@ -2,6 +2,16 @@
 
 参考 [Folder Size Explorer](https://www.folder-size.com/) 的思路,用 SwiftUI 编写的 macOS 原生文件夹大小统计工具。
 
+## 界面预览
+
+**统计视图**(树形大小 / 占比 / 文件数,右侧详情与环形图):
+
+<img src="docs/screenshot-main.png" width="640" alt="统计视图" />
+
+**Everything 式搜索**(输入即搜,示例面板点击即用):
+
+<img src="docs/screenshot-search.png" width="640" alt="搜索窗口" />
+
 ## 功能
 
 - **渐进式扫描**:后台 `NSDirectoryEnumerator` 深度遍历,边扫边出结果,不用等整个目录扫完
