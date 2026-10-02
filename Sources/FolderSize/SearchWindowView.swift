@@ -42,6 +42,7 @@ struct SearchWindowView: View {
         .onAppear {
             AppFocus.activateApp(context: "搜索窗口")
             Diag.log("窗口出现 scope=\(scope.absolutePath)")
+            store.ensureSearchIndex() // 浏览模式:有缓存则后台装进搜索索引
             runSearch()
         }
         .onChange(of: query) { _, _ in runSearch() }
@@ -169,6 +170,8 @@ struct SearchWindowView: View {
     private var content: some View {
         if !scopeValid {
             hint("根目录已变更(\(scope.rootPath))\n请回到主窗口重新打开搜索")
+        } else if store.browseOnly && store.indexCount == 0 && !store.isScanning {
+            hint("浏览模式未统计,还没有可搜索的索引\n回主窗口点「统计大小」后即可全文搜索")
         } else if queryTrimmed.isEmpty {
             hint("点\"搜索示例\"浮出面板参考写法,或直接输入关键词\n空格分隔多个关键词(AND),按相对路径匹配,输入即出结果")
         } else if result.isEmpty {

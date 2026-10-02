@@ -34,7 +34,7 @@ struct WelcomeView: View {
                     .foregroundStyle(.secondary)
                 ForEach(Locations.quick().prefix(5)) { item in
                     Button(item.name) {
-                        store.startScan(at: item.url)
+                        store.openForBrowse(at: item.url)
                     }
                     .controlSize(.small)
                 }
@@ -56,7 +56,7 @@ struct WelcomeView: View {
         .frame(width: 360, height: 110)
         .dropDestination(for: URL.self) { urls, _ in
             guard let url = urls.first(where: { $0.hasDirectoryPath }) else { return false }
-            store.startScan(at: url)
+            store.openForBrowse(at: url)
             return true
         }
     }

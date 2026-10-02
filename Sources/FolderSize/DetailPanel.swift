@@ -147,7 +147,20 @@ struct DetailPanel: View {
 
     private var breakdown: some View {
         VStack(alignment: .leading, spacing: 10) {
-            if node.sorted.isEmpty {
+            if store.browseOnly {
+                VStack(spacing: 6) {
+                    Image(systemName: "eye")
+                        .foregroundStyle(.secondary)
+                    Text("浏览模式:未统计大小")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                    Text("点树表右上「统计大小」开始")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.top, 40)
+            } else if node.sorted.isEmpty {
                 Text("此文件夹没有子文件夹")
                     .font(.callout)
                     .foregroundStyle(.secondary)

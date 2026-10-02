@@ -21,12 +21,21 @@ final class ScanStore: ObservableObject {
     @Published private(set) var indexCount = 0
     private(set) var index: [FileRecord] = []
 
+    /// 浏览模式:仅列出顶层文件夹,未统计大小(点「统计大小」/ 重新扫描才进入统计)
+    @Published private(set) var browseOnly = false
+
     @Published var sizeMode: SizeMode = .allocated {
-        didSet { if oldValue != sizeMode { resortAll() } }
+        didSet {
+            guard !browseOnly else { return } // 浏览模式没有大小可排,避免打乱目录名序
+            if oldValue != sizeMode { resortAll() }
+        }
     }
     @Published var includeHidden = true {
         didSet {
-            if oldValue != includeHidden, let url = root?.url {
+            guard oldValue != includeHidden, let url = root?.url else { return }
+            if browseOnly {
+                openForBrowse(at: url) // 浏览模式下只重新列目录
+            } else {
                 startScan(at: url, preferCache: false) // 口径变了,缓存作废
             }
         }
@@ -46,11 +55,87 @@ final class ScanStore: ObservableObject {
         let args = CommandLine.arguments
         if let i = args.firstIndex(of: "--path"), i + 1 < args.count {
             let raw = (args[i + 1] as NSString).expandingTildeInPath
-            startScan(at: URL(fileURLWithPath: raw))
+            openForBrowse(at: URL(fileURLWithPath: raw))
         }
     }
 
     // MARK: - 控制
+
+    /// 浏览模式:只列出 url 的顶层子文件夹(同步、秒开),不统计大小。
+    /// 所有"打开目录"的入口(侧栏 / 收藏夹 / 拖拽 / --path)默认走这里,
+    /// 需要大小数据时再点「统计大小」或 ⌘R 进入统计。
+    func openForBrowse(at url: URL) {
+        scanTask?.cancel()
+        generation += 1
+
+        let node = Node(url: url, relPath: "")
+        var children: [Node] = []
+        let entries = (try? FileManager.default.contentsOfDirectory(
+            at: url,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: includeHidden ? [] : [.skipsHiddenFiles]
+        )) ?? []
+        for entry in entries
+        where (try? entry.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true {
+            let child = Node(url: entry, relPath: entry.lastPathComponent, parent: node)
+            node.children[entry.lastPathComponent] = child
+            children.append(child)
+        }
+        // 浏览模式没有大小可排,按目录名自然排序
+        node.sorted = children.sorted {
+            $0.name.localizedStandardCompare($1.name) == .orderedAscending
+        }
+
+        root = node
+        stack = [node]
+        dirty = []
+        browseOnly = true
+        topFiles = []
+        minTopSize = 0
+        index = []
+        indexCount = 0
+        scannedFiles = 0
+        scannedBytes = 0
+        errorCount = 0
+        lastError = nil
+        elapsed = 0
+        wasCancelled = false
+        loadedFromCache = nil
+        isScanning = false
+        ticker?.cancel()
+        ticker = nil
+        objectWillChange.send()
+    }
+
+    /// 浏览模式下点开搜索窗口时:若本地有该目录的索引缓存,后台静默装载进搜索索引
+    /// (不重建可视树,不改变浏览状态);无缓存则搜索页会提示先统计。
+    func ensureSearchIndex() {
+        guard browseOnly, index.isEmpty, let url = root?.url else { return }
+        let cacheURL = IndexCache.cacheURL(for: url)
+        let gen = generation
+        Task.detached(priority: .userInitiated) { [weak self] in
+            guard let cached = IndexCache.read(url: cacheURL) else { return }
+            let records = cached.events.enumerated().map { i, event in
+                FileRecord(
+                    id: i,
+                    relPath: event.path,
+                    lowercasedPath: event.path.lowercased(),
+                    isDirectory: event.isDirectory,
+                    logical: event.logical,
+                    allocated: event.allocated
+                )
+            }
+            await self?.installSearchIndex(records, generation: gen)
+        }
+    }
+
+    @MainActor
+    private func installSearchIndex(_ records: [FileRecord], generation gen: Int) {
+        guard gen == self.generation, browseOnly, index.isEmpty else { return }
+        index = records
+        indexCount = records.count
+        objectWillChange.send()
+    }
 
     /// - Parameter preferCache: 优先加载本地缓存索引(命中则不再扫描)
     func startScan(at url: URL, preferCache: Bool = true) {
@@ -94,10 +179,10 @@ final class ScanStore: ObservableObject {
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = false
-        panel.message = "选择要统计的文件夹"
-        panel.prompt = "统计"
+        panel.message = "选择要打开的文件夹(打开后可再点「统计大小」)"
+        panel.prompt = "打开"
         if panel.runModal() == .OK, let url = panel.url {
-            startScan(at: url)
+            openForBrowse(at: url)
         }
     }
 
@@ -171,6 +256,7 @@ final class ScanStore: ObservableObject {
         root = node
         stack = [node]
         dirty = []
+        browseOnly = false
         topFiles = []
         minTopSize = 0
         index = []

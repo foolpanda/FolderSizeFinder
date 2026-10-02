@@ -42,22 +42,22 @@ struct FolderTableView: View {
                 .help(node.url.path)
             }
             TableColumn("大小") { node in
-                Text(Format.size(node.size(store.sizeMode)))
+                Text(store.browseOnly ? "—" : Format.size(node.size(store.sizeMode)))
                     .monospacedDigit()
             }
             .width(min: 92, ideal: 102)
             TableColumn("占比") { node in
-                Text(percent(of: node))
+                Text(store.browseOnly ? "—" : percent(of: node))
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
             }
             .width(min: 58, ideal: 62)
             TableColumn("文件") { node in
-                Text(Format.count(node.files)).monospacedDigit()
+                Text(store.browseOnly ? "—" : Format.count(node.files)).monospacedDigit()
             }
             .width(min: 58, ideal: 64)
             TableColumn("文件夹") { node in
-                Text(Format.count(node.dirs)).monospacedDigit()
+                Text(store.browseOnly ? "—" : Format.count(node.dirs)).monospacedDigit()
             }
             .width(min: 58, ideal: 64)
         }
@@ -65,6 +65,27 @@ struct FolderTableView: View {
             if root.sorted.isEmpty && !store.isScanning {
                 Text("此文件夹没有子文件夹")
                     .foregroundStyle(.secondary)
+            }
+        }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if store.browseOnly {
+                HStack(spacing: 10) {
+                    Label("浏览模式:仅列出顶层文件夹,未统计大小", systemImage: "eye")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button {
+                        if let url = store.root?.url { store.startScan(at: url) }
+                    } label: {
+                        Label("统计大小", systemImage: "chart.bar.fill")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .keyboardShortcut("r", modifiers: .command)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 5)
+                .background(.bar)
             }
         }
     }
@@ -90,7 +111,10 @@ struct FolderTableView: View {
             NSPasteboard.general.setString(node.url.path, forType: .string)
         }
         Divider()
-        Button("以此文件夹为根重新扫描") {
+        Button("进入此文件夹(浏览)") {
+            store.openForBrowse(at: node.url)
+        }
+        Button(store.browseOnly ? "统计此文件夹大小" : "以此文件夹为根重新扫描") {
             store.startScan(at: node.url)
         }
     }

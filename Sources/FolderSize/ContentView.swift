@@ -53,6 +53,8 @@ struct ContentView: View {
                 } label: {
                     Label("搜索", systemImage: "magnifyingglass")
                 }
+                .buttonStyle(.borderedProminent)
+                .tint(.blue)
                 .keyboardShortcut("f", modifiers: .command)
                 .disabled(store.root == nil)
 
@@ -101,7 +103,10 @@ struct StatusBar: View {
                     .controlSize(.mini)
                 Text(store.loadedFromCache == nil ? "正在扫描…" : "正在载入缓存…")
             } else if store.root != nil {
-                if let cached = store.loadedFromCache {
+                if store.browseOnly {
+                    Label("浏览模式 · 未统计大小", systemImage: "eye")
+                        .foregroundStyle(.secondary)
+                } else if let cached = store.loadedFromCache {
                     Label("已载入缓存", systemImage: "externaldrive.badge.clock")
                         .foregroundStyle(.green)
                         .help("数据来自本地索引缓存(保存于 \(Format.time(cached))。\n点击工具栏\"重新扫描\"获取最新数据。")
@@ -114,9 +119,15 @@ struct StatusBar: View {
                 Text("未选择文件夹")
             }
 
-            Text("\(Format.count(store.scannedFiles)) 个文件 · \(Format.size(store.scannedBytes)) · \(String(format: "%.1f s", store.elapsed))")
-                .monospacedDigit()
-                .foregroundStyle(.secondary)
+            if store.browseOnly, let root = store.root {
+                Text("\(Format.count(root.sorted.count)) 个子文件夹 · 未统计")
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("\(Format.count(store.scannedFiles)) 个文件 · \(Format.size(store.scannedBytes)) · \(String(format: "%.1f s", store.elapsed))")
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
 
             Spacer()
 
