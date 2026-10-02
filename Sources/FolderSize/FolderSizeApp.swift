@@ -16,7 +16,10 @@ struct FolderSizeApp: App {
                 .environmentObject(launchers)
                 .environmentObject(settings)
                 .id(settings.language) // 语言切换时整树重建,文案即时生效
-                .onAppear { AppFocus.activateApp(context: "主窗口") }
+                .onAppear {
+                    AppFocus.activateApp(context: "主窗口")
+                    setDockIconIfUnbundled()
+                }
         }
         .defaultSize(width: 1280, height: 840)
         .commands {
@@ -52,5 +55,15 @@ struct FolderSizeApp: App {
                 .id(settings.language)
         }
         .defaultSize(width: 780, height: 480)
+    }
+
+    /// 裸二进制(swift run / .build 直接运行)没有 bundle icns,
+    /// 用 SwiftPM 资源里的图标设置 Dock/窗口图标;打包 .app 走 Info.plist 不受影响
+    private func setDockIconIfUnbundled() {
+        guard Bundle.main.bundleIdentifier == nil,
+              NSApp.applicationIconImage == nil,
+              let url = Bundle.module.url(forResource: "AppIcon", withExtension: "png"),
+              let icon = NSImage(contentsOf: url) else { return }
+        NSApp.applicationIconImage = icon
     }
 }

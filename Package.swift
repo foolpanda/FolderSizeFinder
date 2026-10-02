@@ -9,7 +9,10 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "FolderSize",
-            path: "Sources/FolderSize"
+            path: "Sources/FolderSize",
+            resources: [
+                .copy("Resources/AppIcon.png") // 程序图标:bundle 走 .icns,裸二进制运行时加载
+            ]
         ),
         .testTarget(
             name: "FolderSizeTests",

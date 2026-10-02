@@ -35,7 +35,18 @@ jobs:
       - name: 组装 .app 并打包
         run: |
           APP=dist/FolderSize.app
-          mkdir -p "$APP/Contents/MacOS"
+          mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+          # 从仓库内置图标生成多尺寸 icns
+          ICONSET=$(mktemp -d)/FolderSize.iconset
+          mkdir -p "$ICONSET"
+          SRC=Sources/FolderSize/Resources/AppIcon.png
+          for s in 16 32 128 256 512; do sips -z $s $s "$SRC" --out "$ICONSET/icon_${s}x${s}.png" >/dev/null; done
+          sips -z 32 32 "$SRC" --out "$ICONSET/icon_16x16@2x.png" >/dev/null
+          sips -z 64 64 "$SRC" --out "$ICONSET/icon_32x32@2x.png" >/dev/null
+          sips -z 256 256 "$SRC" --out "$ICONSET/icon_128x128@2x.png" >/dev/null
+          sips -z 512 512 "$SRC" --out "$ICONSET/icon_256x256@2x.png" >/dev/null
+          sips -z 1024 1024 "$SRC" --out "$ICONSET/icon_512x512@2x.png" >/dev/null
+          iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/FolderSize.icns"
           cat > "$APP/Contents/Info.plist" <<'PLIST'
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -46,6 +57,7 @@ jobs:
               <key>CFBundleIdentifier</key><string>local.foldersize.app</string>
               <key>CFBundlePackageType</key><string>APPL</string>
               <key>CFBundleExecutable</key><string>FolderSize</string>
+              <key>CFBundleIconFile</key><string>FolderSize</string>
               <key>CFBundleVersion</key><string>1</string>
               <key>CFBundleShortVersionString</key><string>1.0</string>
               <key>CFBundleDevelopmentRegion</key><string>zh_CN</string>
