@@ -40,6 +40,9 @@ struct FolderTableView: View {
                 }
                 .contextMenu { menu(for: node) }
                 .help(node.url.path)
+                .onAppear {
+                    store.browseListIfNeeded(node) // 浏览模式:可见行懒加载子目录
+                }
             }
             TableColumn("大小") { node in
                 Text(store.browseOnly ? "—" : Format.size(node.size(store.sizeMode)))
@@ -53,11 +56,13 @@ struct FolderTableView: View {
             }
             .width(min: 58, ideal: 62)
             TableColumn("文件") { node in
-                Text(store.browseOnly ? "—" : Format.count(node.files)).monospacedDigit()
+                Text(store.browseOnly && node.browsePending ? "—" : Format.count(node.files))
+                    .monospacedDigit()
             }
             .width(min: 58, ideal: 64)
             TableColumn("文件夹") { node in
-                Text(store.browseOnly ? "—" : Format.count(node.dirs)).monospacedDigit()
+                Text(store.browseOnly && node.browsePending ? "—" : Format.count(node.dirs))
+                    .monospacedDigit()
             }
             .width(min: 58, ideal: 64)
         }

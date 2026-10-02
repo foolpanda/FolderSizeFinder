@@ -24,6 +24,10 @@ final class Node: Identifiable, Hashable {
     var children: [String: Node] = [:]
     var sorted: [Node] = []
 
+    /// 浏览模式懒加载标记:pending = 尚未 readdir,先乐观给展开箭头;
+    /// 统计模式节点保持 false,空目录仍无箭头
+    var browsePending = false
+
     init(url: URL, relPath: String, parent: Node? = nil) {
         self.url = url
         self.relPath = relPath
@@ -36,9 +40,11 @@ final class Node: Identifiable, Hashable {
         mode == .allocated ? allocated : logical
     }
 
-    /// Table 的 children keyPath:空目录不显示展开箭头
+    /// Table 的 children keyPath:空目录不显示展开箭头;
+    /// 浏览模式未列出的目录先乐观给箭头(懒加载由可见行触发)
     var tableChildren: [Node]? {
-        sorted.isEmpty ? nil : sorted
+        if !sorted.isEmpty { return sorted }
+        return browsePending ? [] : nil
     }
 
     static func == (lhs: Node, rhs: Node) -> Bool { lhs.id == rhs.id }

@@ -69,22 +69,7 @@ final class ScanStore: ObservableObject {
         generation += 1
 
         let node = Node(url: url, relPath: "")
-        var children: [Node] = []
-        let entries = (try? FileManager.default.contentsOfDirectory(
-            at: url,
-            includingPropertiesForKeys: [.isDirectoryKey],
-            options: includeHidden ? [] : [.skipsHiddenFiles]
-        )) ?? []
-        for entry in entries
-        where (try? entry.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true {
-            let child = Node(url: entry, relPath: entry.lastPathComponent, parent: node)
-            node.children[entry.lastPathComponent] = child
-            children.append(child)
-        }
-        // 浏览模式没有大小可排,按目录名自然排序
-        node.sorted = children.sorted {
-            $0.name.localizedStandardCompare($1.name) == .orderedAscending
-        }
+        listChildren(of: node)
 
         root = node
         stack = [node]
@@ -135,6 +120,61 @@ final class ScanStore: ObservableObject {
         index = records
         indexCount = records.count
         objectWillChange.send()
+    }
+
+    // MARK: - 浏览模式懒加载展开
+
+    private var browseScheduled: Set<UUID> = []
+
+    /// 浏览模式懒加载:目录行可见时调用(行 onAppear),
+    /// 未 readdir 过的目录在下一拍列出子目录并填充 文件/文件夹 数量
+    func browseListIfNeeded(_ node: Node) {
+        guard browseOnly, node.browsePending, !browseScheduled.contains(node.id) else { return }
+        browseScheduled.insert(node.id)
+        let gen = generation
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            defer { self.browseScheduled.remove(node.id) }
+            guard self.browseOnly, gen == self.generation else { return }
+            self.listChildren(of: node)
+            self.objectWillChange.send()
+        }
+    }
+
+    /// readdir node 的直接条目:建子目录树(sorted)、直接子文件夹数(dirs)、
+    /// 直接文件数(files);子目录标记 pending,等它们可见时再各自懒加载
+    private func listChildren(of node: Node) {
+        node.browsePending = false
+        let entries = (try? FileManager.default.contentsOfDirectory(
+            at: node.url,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: includeHidden ? [] : [.skipsHiddenFiles]
+        )) ?? []
+        var kids: [Node] = []
+        var dirCount = 0
+        var fileCount = 0
+        for entry in entries {
+            if (try? entry.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true {
+                dirCount += 1
+                let child = Node(
+                    url: entry,
+                    relPath: node.relPath.isEmpty
+                        ? entry.lastPathComponent
+                        : node.relPath + "/" + entry.lastPathComponent,
+                    parent: node
+                )
+                child.browsePending = true
+                node.children[entry.lastPathComponent] = child
+                kids.append(child)
+            } else {
+                fileCount += 1
+            }
+        }
+        node.dirs = dirCount
+        node.files = fileCount
+        node.sorted = kids.sorted {
+            $0.name.localizedStandardCompare($1.name) == .orderedAscending
+        }
     }
 
     /// - Parameter preferCache: 优先加载本地缓存索引(命中则不再扫描)
