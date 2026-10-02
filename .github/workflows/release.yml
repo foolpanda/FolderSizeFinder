@@ -65,13 +65,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            # 正式版:tag 名即版本号,自动生成变更说明
-            gh release create "$GITHUB_REF_NAME" dist/* \
+            # 正式版:tag 名即版本号,自动生成变更说明(显式列出文件,dist 下的目录不能作为资产)
+            gh release create "$GITHUB_REF_NAME" \
+              dist/FolderSize-macos-universal.zip dist/FolderSize-cli-universal \
               --title "FolderSize $GITHUB_REF_NAME" --generate-notes
           else
             # 滚动预发布:删旧建新,始终指向 main 最新提交
             gh release delete latest --cleanup-tag --yes 2>/dev/null || true
-            gh release create latest dist/* --target "$GITHUB_SHA" --prerelease \
+            gh release create latest \
+              dist/FolderSize-macos-universal.zip dist/FolderSize-cli-universal \
+              --target "$GITHUB_SHA" --prerelease \
               --title "最新构建 · $(date -u +%Y-%m-%d) · ${GITHUB_SHA::7}" \
               --notes "main@${GITHUB_SHA::7} 自动构建,Universal(arm64 + x86_64),需 macOS 14+。
 
