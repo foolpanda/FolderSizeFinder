@@ -124,38 +124,29 @@ final class ScanStore: ObservableObject {
 
     // MARK: - 浏览模式懒加载展开
 
-    private var browseScheduled: Set<UUID> = []
-
-    /// 浏览模式懒加载:目录行可见时调用(行 onAppear),
-    /// 未 readdir 过的目录在下一拍列出子目录并填充 文件/文件夹 数量
+    /// 浏览模式懒加载:未 readdir 过的目录列出子目录并填充 文件/文件夹 数量。
+    /// 由 NSOutlineView 数据源在绘制/展开行时同步调用——AppKit 展开前必查询,
+    /// 因此展开箭头永远是真实子节点,不存在"点了展开却没内容"的时序问题
     func browseListIfNeeded(_ node: Node) {
-        guard browseOnly, node.browsePending, !browseScheduled.contains(node.id) else { return }
-        browseScheduled.insert(node.id)
-        let gen = generation
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            defer { self.browseScheduled.remove(node.id) }
-            guard self.browseOnly, gen == self.generation else { return }
-            self.listChildren(of: node)
-            self.objectWillChange.send()
-        }
+        guard browseOnly, node.browsePending else { return }
+        listChildren(of: node)
     }
 
     /// readdir node 的直接条目:建子目录树(sorted)、直接子文件夹数(dirs)、
-    /// 直接文件数(files);子目录标记 pending,等它们可见时再各自懒加载
+    /// 直接文件数(files);浏览模式下文件也作为叶子行列出(带自身大小),
+    /// 子目录标记 pending,等它们可见时再各自懒加载
     private func listChildren(of node: Node) {
         node.browsePending = false
         let entries = (try? FileManager.default.contentsOfDirectory(
             at: node.url,
-            includingPropertiesForKeys: [.isDirectoryKey],
+            includingPropertiesForKeys: [.isDirectoryKey, .fileSizeKey, .totalFileAllocatedSizeKey],
             options: includeHidden ? [] : [.skipsHiddenFiles]
         )) ?? []
-        var kids: [Node] = []
-        var dirCount = 0
+        var dirs: [Node] = []
+        var files: [Node] = []
         var fileCount = 0
         for entry in entries {
             if (try? entry.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true {
-                dirCount += 1
                 let child = Node(
                     url: entry,
                     relPath: node.relPath.isEmpty
@@ -165,16 +156,32 @@ final class ScanStore: ObservableObject {
                 )
                 child.browsePending = true
                 node.children[entry.lastPathComponent] = child
-                kids.append(child)
+                dirs.append(child)
             } else {
                 fileCount += 1
+                let child = Node(
+                    url: entry,
+                    relPath: node.relPath.isEmpty
+                        ? entry.lastPathComponent
+                        : node.relPath + "/" + entry.lastPathComponent,
+                    parent: node
+                )
+                child.isFile = true
+                let values = try? entry.resourceValues(
+                    forKeys: [.fileSizeKey, .totalFileAllocatedSizeKey])
+                child.logical = Int64(values?.fileSize ?? 0)
+                child.allocated = Int64(values?.totalFileAllocatedSize ?? 0)
+                files.append(child)
             }
         }
-        node.dirs = dirCount
+        node.dirs = dirs.count
         node.files = fileCount
-        node.sorted = kids.sorted {
+        // 文件夹在前,各自按目录名自然排序
+        node.sorted = (dirs.sorted {
             $0.name.localizedStandardCompare($1.name) == .orderedAscending
-        }
+        } + files.sorted {
+            $0.name.localizedStandardCompare($1.name) == .orderedAscending
+        })
     }
 
     /// - Parameter preferCache: 优先加载本地缓存索引(命中则不再扫描)

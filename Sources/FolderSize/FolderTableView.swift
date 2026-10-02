@@ -15,136 +15,381 @@ struct FolderSplitView: View {
             FolderTableView(store: store, root: root, selection: $selection)
                 .frame(minWidth: 440)
                 .layoutPriority(1)
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    if store.browseOnly { browseBar }
+                }
             DetailPanel(store: store, node: selectedNode ?? root)
                 .frame(minWidth: 270, idealWidth: 320, maxWidth: 380)
         }
     }
+
+    /// 浏览模式提示条:点「统计大小」才开始统计
+    private var browseBar: some View {
+        HStack(spacing: 10) {
+            Label("浏览模式:未统计大小(文件夹显示直接数量,文件显示自身大小)", systemImage: "eye")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            Spacer()
+            Button {
+                if let url = store.root?.url { store.startScan(at: url) }
+            } label: {
+                Label("统计大小", systemImage: "chart.bar.fill")
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+            .keyboardShortcut("r", modifiers: .command)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 5)
+        .background(.bar)
+    }
 }
 
-struct FolderTableView: View {
+/// 目录树表:封装原生 NSOutlineView。
+/// SwiftUI Table 的 children 展开箭头在 macOS 上不可靠(点击无响应),
+/// NSOutlineView 的展开由 AppKit 保证;浏览模式的懒加载在数据源查询时同步完成,
+/// 行绘制时子目录已就绪,展开箭头永远是真实的。
+struct FolderTableView: NSViewRepresentable {
     @ObservedObject var store: ScanStore
-    @EnvironmentObject private var favorites: FavoritesStore
+    @EnvironmentObject var favorites: FavoritesStore
+    @EnvironmentObject var launchers: LauncherStore
     @Environment(\.openWindow) private var openWindow
     let root: Node
     @Binding var selection: Node.ID?
 
-    var body: some View {
-        Table(root.sorted, children: \.tableChildren, selection: $selection) {
-            TableColumn("名称") { node in
-                HStack(spacing: 6) {
-                    Image(systemName: "folder.fill")
-                        .foregroundStyle(Color.accentColor)
-                    Text(node.name)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
-                .contextMenu { menu(for: node) }
-                .help(node.url.path)
-                .onAppear {
-                    store.browseListIfNeeded(node) // 浏览模式:可见行懒加载子目录
-                }
-            }
-            TableColumn("大小") { node in
-                Text(store.browseOnly ? "—" : Format.size(node.size(store.sizeMode)))
-                    .monospacedDigit()
-            }
-            .width(min: 92, ideal: 102)
-            TableColumn("占比") { node in
-                Text(store.browseOnly ? "—" : percent(of: node))
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
-            }
-            .width(min: 58, ideal: 62)
-            TableColumn("文件") { node in
-                Text(store.browseOnly && node.browsePending ? "—" : Format.count(node.files))
-                    .monospacedDigit()
-            }
-            .width(min: 58, ideal: 64)
-            TableColumn("文件夹") { node in
-                Text(store.browseOnly && node.browsePending ? "—" : Format.count(node.dirs))
-                    .monospacedDigit()
-            }
-            .width(min: 58, ideal: 64)
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let outline = NSOutlineView()
+        outline.headerView = NSTableHeaderView()
+        outline.rowHeight = 24
+        outline.indentationPerLevel = 12
+        outline.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
+        outline.autoresizesOutlineColumn = true
+
+        let name = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("name"))
+        name.title = "名称"
+        name.width = 280
+        name.minWidth = 160
+        name.resizingMask = .autoresizingMask
+        outline.addTableColumn(name)
+        outline.outlineTableColumn = name
+
+        for (id, title, width, minWidth) in [
+            ("size", "大小", CGFloat(96), CGFloat(88)),
+            ("percent", "占比", CGFloat(62), CGFloat(56)),
+            ("files", "文件", CGFloat(62), CGFloat(56)),
+            ("dirs", "文件夹", CGFloat(70), CGFloat(62)),
+        ] {
+            let col = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(id))
+            col.title = title
+            col.width = width
+            col.minWidth = minWidth
+            col.resizingMask = .userResizingMask
+            outline.addTableColumn(col)
         }
-        .overlay {
-            if root.sorted.isEmpty && !store.isScanning {
-                Text("此文件夹没有子文件夹")
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .safeAreaInset(edge: .top, spacing: 0) {
-            if store.browseOnly {
-                HStack(spacing: 10) {
-                    Label("浏览模式:仅列出顶层文件夹,未统计大小", systemImage: "eye")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Button {
-                        if let url = store.root?.url { store.startScan(at: url) }
-                    } label: {
-                        Label("统计大小", systemImage: "chart.bar.fill")
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
-                    .keyboardShortcut("r", modifiers: .command)
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 5)
-                .background(.bar)
-            }
-        }
+
+        outline.dataSource = context.coordinator
+        outline.delegate = context.coordinator
+        outline.target = context.coordinator
+        outline.doubleAction = #selector(Coordinator.doubleClick(_:))
+
+        let menu = NSMenu()
+        menu.delegate = context.coordinator
+        outline.menu = menu
+        context.coordinator.outline = outline
+
+        let scroll = NSScrollView()
+        scroll.documentView = outline
+        scroll.hasVerticalScroller = true
+        scroll.autohidesScrollers = true
+        return scroll
     }
 
-    private func percent(of node: Node) -> String {
-        guard let parent = node.parent else { return "100%" }
-        return Format.percent(node.size(store.sizeMode), of: parent.size(store.sizeMode))
+    func updateNSView(_ nsView: NSScrollView, context: Context) {
+        context.coordinator.parent = self
+        guard let outline = nsView.documentView as? NSOutlineView else { return }
+        context.coordinator.syncData()
+        context.coordinator.syncSelection()
     }
 
-    @ViewBuilder
-    private func menu(for node: Node) -> some View {
-        addFavoriteMenu(node)
-        LauncherMenuItems(url: node.url)
-        Button("在此文件夹中搜索…") {
-            openWindow(value: SearchScope(
-                rootPath: root.url.path,
+    // MARK: - 协调器(数据源 + 代理 + 右键菜单)
+
+    @MainActor
+    final class Coordinator: NSObject, NSOutlineViewDataSource, NSOutlineViewDelegate, NSMenuDelegate {
+        var parent: FolderTableView
+        weak var outline: NSOutlineView?
+        private var lastRootID: UUID?
+
+        init(_ parent: FolderTableView) { self.parent = parent }
+
+        private var store: ScanStore { parent.store }
+
+        /// 行的子目录;浏览模式下未列出的目录在查询时同步 readdir(懒加载)
+        private func children(of node: Node) -> [Node] {
+            if store.browseOnly && node.browsePending {
+                store.browseListIfNeeded(node)
+            }
+            return node.sorted
+        }
+
+        // MARK: 数据源
+
+        func outlineView(_ outline: NSOutlineView, numberOfChildrenOfItem item: Any?) -> Int {
+            children(of: (item as? Node) ?? parent.root).count
+        }
+
+        func outlineView(_ outline: NSOutlineView, child index: Int, ofItem item: Any?) -> Any {
+            let node = (item as? Node) ?? parent.root
+            return node.sorted[index]
+        }
+
+        func outlineView(_ outline: NSOutlineView, isItemExpandable item: Any) -> Bool {
+            guard let node = item as? Node else { return false }
+            return !children(of: node).isEmpty
+        }
+
+        // MARK: 单元格
+
+        func outlineView(_ outline: NSOutlineView, viewFor tableColumn: NSTableColumn?, item: Any) -> NSView? {
+            guard let node = item as? Node else { return nil }
+            switch tableColumn?.identifier.rawValue {
+            case "size":
+                // 浏览模式:文件夹不显示大小,文件显示自身大小
+                let text: String
+                if store.browseOnly {
+                    text = node.isFile ? Format.size(node.logical) : "—"
+                } else {
+                    text = Format.size(node.size(store.sizeMode))
+                }
+                return cell("size", text, monospaced: true, secondary: node.isFile)
+            case "percent":
+                return cell("percent", store.browseOnly ? "—" : percent(of: node),
+                            monospaced: true, secondary: true)
+            case "files":
+                let pending = store.browseOnly && node.browsePending
+                return cell("files", (pending || node.isFile) ? "—" : Format.count(node.files),
+                            monospaced: true)
+            case "dirs":
+                let pending = store.browseOnly && node.browsePending
+                return cell("dirs", (pending || node.isFile) ? "—" : Format.count(node.dirs),
+                            monospaced: true)
+            default:
+                return nameCell(node)
+            }
+        }
+
+        func outlineView(_ outline: NSOutlineView, toolTipFor cell: NSView, rect: NSRectPointer,
+                         tableColumn: NSTableColumn?, item: Any, mouseLocation: NSPoint) -> String {
+            guard let node = item as? Node else { return "" }
+            return store.browseOnly ? node.url.path + "(浏览模式,未统计大小)" : node.url.path
+        }
+
+        private func percent(of node: Node) -> String {
+            guard let parent = node.parent else { return "100%" }
+            return Format.percent(node.size(store.sizeMode), of: parent.size(store.sizeMode))
+        }
+
+        private func cell(_ id: String, _ text: String,
+                          monospaced: Bool = false, secondary: Bool = false) -> NSTableCellView {
+            let view = NSTableCellView()
+            view.identifier = NSUserInterfaceItemIdentifier(id)
+            let field = NSTextField(labelWithString: text)
+            field.font = monospaced
+                ? .monospacedDigitSystemFont(ofSize: 13, weight: .regular)
+                : .systemFont(ofSize: 13)
+            field.textColor = secondary ? .secondaryLabelColor : .labelColor
+            field.lineBreakMode = .byTruncatingTail
+            field.translatesAutoresizingMaskIntoConstraints = false
+            view.addSubview(field)
+            NSLayoutConstraint.activate([
+                field.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 2),
+                field.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+            ])
+            view.textField = field
+            return view
+        }
+
+        private func nameCell(_ node: Node) -> NSTableCellView {
+            let view = NSTableCellView()
+            view.identifier = NSUserInterfaceItemIdentifier("name")
+            let icon = NSImageView()
+            icon.image = NSImage(systemSymbolName: node.isFile ? "doc" : "folder.fill",
+                                 accessibilityDescription: nil)
+            icon.contentTintColor = node.isFile ? .secondaryLabelColor : .controlAccentColor
+            icon.translatesAutoresizingMaskIntoConstraints = false
+            let field = NSTextField(labelWithString: node.name)
+            field.font = .systemFont(ofSize: 13)
+            field.lineBreakMode = .byTruncatingMiddle
+            field.translatesAutoresizingMaskIntoConstraints = false
+            view.addSubview(icon)
+            view.addSubview(field)
+            NSLayoutConstraint.activate([
+                icon.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+                icon.widthAnchor.constraint(equalToConstant: 18),
+                icon.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+                field.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 5),
+                field.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+                field.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+            ])
+            view.textField = field
+            view.imageView = icon
+            return view
+        }
+
+        // MARK: 选中 / 双击
+
+        func outlineViewSelectionDidChange(_ notification: Notification) {
+            guard let outline else { return }
+            parent.selection = (outline.item(atRow: outline.selectedRow) as? Node)?.id
+        }
+
+        @objc func doubleClick(_ sender: Any) {
+            guard let outline,
+                  let node = outline.item(atRow: outline.selectedRow) as? Node else { return }
+            NSWorkspace.shared.activateFileViewerSelecting([node.url])
+        }
+
+        // MARK: 刷新与选中同步
+
+        /// store 每次 objectWillChange 都会走 updateNSView;reloadData 按
+        /// Node 引用保留展开状态,统计进行中的增量刷新与浏览懒加载都能即时反映
+        func syncData() {
+            guard let outline else { return }
+            if lastRootID != parent.root.id {
+                lastRootID = parent.root.id
+                outline.reloadData()
+                return
+            }
+            outline.reloadData()
+        }
+
+        func syncSelection() {
+            guard let outline else { return }
+            let current = (outline.item(atRow: outline.selectedRow) as? Node)?.id
+            guard current != parent.selection else { return }
+            if let id = parent.selection, let node = Node.find(id, in: parent.root) {
+                let row = outline.row(forItem: node)
+                if row >= 0 {
+                    outline.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+                    return
+                }
+            }
+            outline.deselectAll(nil)
+        }
+
+        // MARK: 右键菜单
+
+        func menuNeedsUpdate(_ menu: NSMenu) {
+            menu.removeAllItems()
+            guard let outline,
+                  outline.clickedRow >= 0,
+                  let node = outline.item(atRow: outline.clickedRow) as? Node else { return }
+            let scope = SearchScope(
+                rootPath: parent.root.url.path,
                 prefix: node.relPath,
                 scopeName: node.name
-            ))
-        }
-        Button("拷贝路径") {
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(node.url.path, forType: .string)
-        }
-        Divider()
-        Button("进入此文件夹(浏览)") {
-            store.openForBrowse(at: node.url)
-        }
-        Button(store.browseOnly ? "统计此文件夹大小" : "以此文件夹为根重新扫描") {
-            store.startScan(at: node.url)
+            )
+            FolderTreeMenuBuilder.build(
+                menu: menu, node: node,
+                store: store, favorites: parent.favorites,
+                launchers: parent.launchers,
+                openSearch: { [openWindow = parent.openWindow] in
+                    openWindow(value: scope)
+                }
+            )
         }
     }
+}
 
-    /// 添加到收藏夹子菜单:顶层 / 已有分类(带轨迹)/ 新建分类并收藏进去
-    @ViewBuilder
-    private func addFavoriteMenu(_ node: Node) -> some View {
-        Menu {
-            Button("收藏到顶层") {
-                favorites.addFolder(name: node.name, path: node.url.path, into: nil)
+// MARK: - 树表右键菜单(NSMenu 版,与侧栏菜单逻辑一致)
+
+@MainActor
+enum FolderTreeMenuBuilder {
+    /// 持有闭包的菜单项目标:item.target = box,点击回调 handler
+    final class ActionBox: NSObject {
+        let handler: () -> Void
+        init(_ handler: @escaping () -> Void) { self.handler = handler }
+        @objc func run(_ sender: NSMenuItem) { handler() }
+    }
+
+    static func item(_ title: String, _ handler: @escaping () -> Void) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: #selector(ActionBox.run(_:)), keyEquivalent: "")
+        let box = ActionBox(handler)
+        item.target = box
+        item.representedObject = box // 保活,防止 target 释放
+        return item
+    }
+
+    static func build(
+        menu: NSMenu, node: Node, store: ScanStore,
+        favorites: FavoritesStore, launchers: LauncherStore,
+        openSearch: @escaping () -> Void
+    ) {
+        // 打开方式
+        menu.addItem(item("在访达中显示") {
+            NSWorkspace.shared.activateFileViewerSelecting([node.url])
+        })
+        menu.addItem(item("在终端中打开") {
+            LauncherStore.openTerminal(at: node.url)
+        })
+        for launcher in launchers.customs {
+            menu.addItem(item(launcher.name) {
+                LauncherStore.runInTerminal(path: node.url.path, command: launcher.command)
+            })
+        }
+        if !launchers.customs.isEmpty { menu.addItem(.separator()) }
+        menu.addItem(item("添加自定义启动器…") {
+            if let name = promptText("添加启动器", "显示名,如:cmux / VS Code / iTerm"),
+               let command = promptText("启动命令", "在目标目录执行的命令;{path} 代表目录路径") {
+                launchers.add(name: name, command: command)
             }
-            ForEach(favorites.categories(), id: \.id) { cat in
-                Button(cat.title) {
-                    favorites.addFolder(name: node.name, path: node.url.path, into: cat.id)
-                }
+        })
+        if !launchers.customs.isEmpty {
+            let remove = NSMenu(title: "移除启动器…")
+            for launcher in launchers.customs {
+                remove.addItem(item(launcher.name) { launchers.remove(id: launcher.id) })
             }
-            Divider()
-            Button("新建分类…") {
-                if let name = promptText("新建分类", "分类名称,如:工作 / 视频"),
-                   let newID = favorites.addCategory(named: name, into: nil) {
-                    favorites.addFolder(name: node.name, path: node.url.path, into: newID)
-                }
+            let removeItem = NSMenuItem(title: "移除启动器…", action: nil, keyEquivalent: "")
+            removeItem.submenu = remove
+            menu.addItem(removeItem)
+        }
+
+        // 收藏夹
+        let fav = NSMenu(title: "添加到收藏夹")
+        fav.addItem(item("收藏到顶层") {
+            favorites.addFolder(name: node.name, path: node.url.path, into: nil)
+        })
+        for cat in favorites.categories() {
+            fav.addItem(item(cat.title) {
+                favorites.addFolder(name: node.name, path: node.url.path, into: cat.id)
+            })
+        }
+        fav.addItem(.separator())
+        fav.addItem(item("新建分类…") {
+            if let name = promptText("新建分类", "分类名称,如:工作 / 视频"),
+               let newID = favorites.addCategory(named: name, into: nil) {
+                favorites.addFolder(name: node.name, path: node.url.path, into: newID)
             }
-        } label: {
-            Label("添加到收藏夹", systemImage: "star")
+        })
+        let favItem = NSMenuItem(title: "添加到收藏夹", action: nil, keyEquivalent: "")
+        favItem.submenu = fav
+        menu.addItem(favItem)
+
+        // 其他
+        menu.addItem(item("在此文件夹中搜索…") { openSearch() })
+        menu.addItem(item("拷贝路径") {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(node.url.path, forType: .string)
+        })
+        menu.addItem(.separator())
+        if !node.isFile {
+            menu.addItem(item("进入此文件夹(浏览)") {
+                store.openForBrowse(at: node.url)
+            })
+            menu.addItem(item(store.browseOnly ? "统计此文件夹大小" : "以此文件夹为根重新扫描") {
+                store.startScan(at: node.url)
+            })
         }
     }
 }

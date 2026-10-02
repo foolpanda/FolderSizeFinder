@@ -34,28 +34,29 @@ final class BrowseModeTests: XCTestCase {
         XCTAssertNil(store.loadedFromCache)
 
         let names = store.root?.sorted.map(\.name)
-        XCTAssertEqual(names, [".hiddendir", "a", "b"]) // 目录名自然序(点开头在前),文件不列
+        // 文件夹在前(自然序),文件跟随;文件也列出且带自身大小
+        XCTAssertEqual(names, [".hiddendir", "a", "b", "f.txt"])
         XCTAssertEqual(store.root?.sorted.first?.relPath, ".hiddendir") // 顶层 relPath = 目录名
         XCTAssertEqual(store.root?.sorted.first { $0.name == "a" }?.url.lastPathComponent, "a")
         // 根的直接数量已就绪;子目录未列出前数量为 0、标记 pending
         XCTAssertEqual(store.root?.dirs, 3)
         XCTAssertEqual(store.root?.files, 1) // f.txt
         XCTAssertEqual(store.root?.sorted.first?.dirs, 0)
-        XCTAssertTrue(store.root!.sorted.allSatisfy(\.browsePending))
-        // 浏览模式没有大小数据
-        XCTAssertTrue(store.root!.sorted.allSatisfy { $0.size(.allocated) == 0 && $0.size(.logical) == 0 })
+        XCTAssertTrue(store.root!.sorted.filter { !$0.isFile }.allSatisfy(\.browsePending))
+        // 浏览模式:文件夹无大小数据;文件行带自身大小
+        XCTAssertTrue(store.root!.sorted.filter { !$0.isFile }
+            .allSatisfy { $0.size(.allocated) == 0 && $0.size(.logical) == 0 })
+        XCTAssertEqual(store.root?.sorted.first { $0.name == "f.txt" }?.logical, 1) // "x" = 1 字节
         XCTAssertEqual(store.indexCount, 0)
     }
 
-    func testLazyExpandFillsChildrenAndCounts() async throws {
+    func testLazyExpandFillsChildrenAndCounts() {
         let store = ScanStore()
         store.openForBrowse(at: rootURL)
         let a = store.root!.sorted.first { $0.name == "a" }!
         XCTAssertTrue(a.browsePending)
-        XCTAssertEqual(a.tableChildren?.isEmpty, true) // 乐观可展开
 
-        store.browseListIfNeeded(a)
-        try await Task.sleep(nanoseconds: 200_000_000) // 等下一拍 readdir
+        store.browseListIfNeeded(a) // 同步懒加载(大纲视图绘制/展开行时调用)
 
         XCTAssertFalse(a.browsePending)
         XCTAssertEqual(a.sorted.map(\.name), ["sub"])
@@ -63,15 +64,12 @@ final class BrowseModeTests: XCTestCase {
         XCTAssertEqual(a.dirs, 1)  // 直接子文件夹数
         XCTAssertEqual(a.files, 0) // a 下没有直接文件
         XCTAssertEqual(a.sorted.first?.browsePending, true)
-        XCTAssertEqual(a.tableChildren?.map(\.name), ["sub"])
 
-        // 已列出的空目录:无展开箭头
+        // 已列出的空目录:数量为 0,不可展开
         let b = store.root!.sorted.first { $0.name == "b" }!
         store.browseListIfNeeded(b)
-        try await Task.sleep(nanoseconds: 200_000_000)
         XCTAssertFalse(b.browsePending)
         XCTAssertTrue(b.sorted.isEmpty)
-        XCTAssertNil(b.tableChildren)
         XCTAssertEqual(b.dirs, 0)
         XCTAssertEqual(b.files, 0)
     }
@@ -80,12 +78,12 @@ final class BrowseModeTests: XCTestCase {
         let store = ScanStore()
         store.includeHidden = true
         store.openForBrowse(at: rootURL)
-        XCTAssertEqual(store.root?.sorted.count, 3)
+        XCTAssertEqual(store.root?.sorted.count, 4) // 3 目录 + f.txt
 
         store.includeHidden = false // 浏览模式下只重新列目录,不触发扫描
         XCTAssertTrue(store.browseOnly)
         XCTAssertFalse(store.isScanning)
-        XCTAssertEqual(store.root?.sorted.map(\.name), ["a", "b"])
+        XCTAssertEqual(store.root?.sorted.map(\.name), ["a", "b", "f.txt"])
     }
 
     func testStartScanExitsBrowseMode() {

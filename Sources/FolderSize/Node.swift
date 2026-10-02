@@ -24,9 +24,12 @@ final class Node: Identifiable, Hashable {
     var children: [String: Node] = [:]
     var sorted: [Node] = []
 
-    /// 浏览模式懒加载标记:pending = 尚未 readdir,先乐观给展开箭头;
-    /// 统计模式节点保持 false,空目录仍无箭头
+    /// 浏览模式懒加载标记:pending = 尚未 readdir;
+    /// 统计模式节点保持 false
     var browsePending = false
+
+    /// 浏览模式的文件行(统计树只有文件夹;浏览模式下文件作为叶子行展示,带自身大小)
+    var isFile = false
 
     init(url: URL, relPath: String, parent: Node? = nil) {
         self.url = url
@@ -38,13 +41,6 @@ final class Node: Identifiable, Hashable {
 
     func size(_ mode: SizeMode) -> Int64 {
         mode == .allocated ? allocated : logical
-    }
-
-    /// Table 的 children keyPath:空目录不显示展开箭头;
-    /// 浏览模式未列出的目录先乐观给箭头(懒加载由可见行触发)
-    var tableChildren: [Node]? {
-        if !sorted.isEmpty { return sorted }
-        return browsePending ? [] : nil
     }
 
     static func == (lhs: Node, rhs: Node) -> Bool { lhs.id == rhs.id }
