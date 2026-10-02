@@ -89,8 +89,15 @@ struct DetailPanel: View {
                         ))
                     }
                 } label: {
+                    // 与工具栏搜索按钮一致的蓝色胶囊强调
                     Label("搜索", systemImage: "magnifyingglass")
+                        .font(.callout.weight(.medium))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 3)
+                        .background(Color.blue, in: Capsule())
                 }
+                .buttonStyle(.plain)
                 .help("打开 Everything 式搜索窗口,范围限定此文件夹")
             }
             .controlSize(.small)
