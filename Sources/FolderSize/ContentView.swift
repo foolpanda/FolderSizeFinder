@@ -30,6 +30,7 @@ struct ContentView: View {
                     store.pickFolder()
                 } label: {
                     Label(L.t("toolbar.pickFolder"), systemImage: "folder.badge.plus")
+                        .help(L.tip("toolbar.pickFolder"))
                 }
                 .keyboardShortcut("o", modifiers: .command)
                 .help(L.tip("toolbar.pickFolder"))
@@ -41,6 +42,7 @@ struct ContentView: View {
                         store.cancelScan()
                     } label: {
                         Label(L.t("toolbar.stop"), systemImage: "stop.fill") // ‖
+                            .help(L.tip("toolbar.stop")) // 挂在内容上:工具栏托管 .help 会丢,双保险
                     }
                     .keyboardShortcut(".", modifiers: .command)
                     .help(L.tip("toolbar.stop"))
@@ -49,6 +51,7 @@ struct ContentView: View {
                         if let url = store.root?.url { store.startScan(at: url, preferCache: false) }
                     } label: {
                         Label(L.t("toolbar.rescan"), systemImage: "play.fill") // ⇒
+                            .help(L.tip("toolbar.rescan"))
                     }
                     .keyboardShortcut("r", modifiers: .command)
                     .disabled(store.root == nil)
@@ -76,6 +79,7 @@ struct ContentView: View {
                         .padding(.horizontal, 10)
                         .padding(.vertical, 4)
                         .background(Color.blue, in: Capsule())
+                        .help(L.tip("toolbar.search"))
                 }
                 .buttonStyle(.plain)
                 .keyboardShortcut("f", modifiers: .command)
