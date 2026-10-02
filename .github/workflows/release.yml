@@ -1,0 +1,83 @@
+name: Release
+
+# 每次推送到 main → 构建并更新滚动的"最新构建"预发布(资产每次覆盖为最新)
+# 推送 v* tag → 生成对应正式版 Release
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 选择完整 Xcode 工具链(SwiftUI 宏插件需要)
+        run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+
+      - name: 构建 Universal 二进制(arm64 + x86_64)
+        run: |
+          swift build -c release --arch arm64 --arch x86_64
+          BIN=.build/release/FolderSize
+          [ -f "$BIN" ] || BIN=.build/apple/Products/Release/FolderSize
+          lipo -info "$BIN"
+          echo "BIN=$BIN" >> "$GITHUB_ENV"
+
+      - name: 组装 .app 并打包
+        run: |
+          APP=dist/FolderSize.app
+          mkdir -p "$APP/Contents/MacOS"
+          cat > "$APP/Contents/Info.plist" <<'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>CFBundleName</key><string>FolderSize</string>
+              <key>CFBundleDisplayName</key><string>FolderSize</string>
+              <key>CFBundleIdentifier</key><string>local.foldersize.app</string>
+              <key>CFBundlePackageType</key><string>APPL</string>
+              <key>CFBundleExecutable</key><string>FolderSize</string>
+              <key>CFBundleVersion</key><string>1</string>
+              <key>CFBundleShortVersionString</key><string>1.0</string>
+              <key>CFBundleDevelopmentRegion</key><string>zh_CN</string>
+              <key>LSMinimumSystemVersion</key><string>14.0</string>
+              <key>NSHighResolutionCapable</key><true/>
+          </dict>
+          </plist>
+          PLIST
+          cp "$BIN" "$APP/Contents/MacOS/FolderSize"
+          codesign --force -s - "$APP"
+          ditto -c -k --keepParent "$APP" dist/FolderSize-macos-universal.zip
+          cp "$BIN" dist/FolderSize-cli-universal
+          ls -la dist/
+
+      - name: 发布 Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            # 正式版:tag 名即版本号,自动生成变更说明
+            gh release create "$GITHUB_REF_NAME" dist/* \
+              --title "FolderSize $GITHUB_REF_NAME" --generate-notes
+          else
+            # 滚动预发布:删旧建新,始终指向 main 最新提交
+            gh release delete latest --cleanup-tag --yes 2>/dev/null || true
+            gh release create latest dist/* --target "$GITHUB_SHA" --prerelease \
+              --title "最新构建 · $(date -u +%Y-%m-%d) · ${GITHUB_SHA::7}" \
+              --notes "main@${GITHUB_SHA::7} 自动构建,Universal(arm64 + x86_64),需 macOS 14+。
+
+          **首次打开**:下载解压后如提示无法验证开发者,先执行 \`xattr -cr FolderSize.app\`,再右键 → 打开。
+
+          **命令行使用**:\`FolderSize.app/Contents/MacOS/FolderSize --path ~/Downloads\`
+
+          正式版本见带 \`v\` 前缀的 tag Release。"
+          fi
