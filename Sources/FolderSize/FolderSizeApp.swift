@@ -4,11 +4,13 @@ import AppKit
 @main
 struct FolderSizeApp: App {
     @StateObject private var store = ScanStore()
+    @StateObject private var favorites = FavoritesStore()
 
     var body: some Scene {
         WindowGroup("文件夹大小") {
             ContentView(store: store)
                 .environmentObject(store)
+                .environmentObject(favorites)
                 .onAppear { AppFocus.activateApp(context: "主窗口") }
         }
         .commands {

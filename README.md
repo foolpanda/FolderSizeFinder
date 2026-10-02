@@ -23,6 +23,7 @@
 - **搜索语法**:多关键词空格分隔(AND,按相对路径匹配,不区分大小写)、`*.pdf`/`IMG_*.jpg` 名称通配符、`ext:log` 扩展名、`size:>100mb` / `size:<1gb` / `size:>=2kb` 大小比较(单位 b/kb/mb/gb/tb)、`folder:` 只看文件夹(可带关键词如 `folder:node`)、`file:` 只看文件,均可自由组合,如 `mp4 size:>500mb`
 - **索引落盘**:完整扫描后自动保存二进制索引(`~/Library/Application Support/FolderSize/Indexes/*.fsidx`);再次打开同一目录**秒载缓存不再扫描**(状态栏显示"已载入缓存",点"重新扫描"刷新);另支持 文件菜单 → 导出索引…/打开索引… 交换 `.fsidx` 文件
 - **隐藏文件开关**、错误统计(无权限目录计数)、Finder 定位、拷贝路径、右键"设为根"重扫
+- **收藏夹**(侧栏"卷"下方):中间树列表右键文件夹 →「添加到收藏夹」(收藏到顶层 / 已有分类 / 新建分类)。类似 Chrome 收藏夹,支持**多级分类**整理:右键分类或收藏可 重命名 / 新建子分类 / 移动到分类(子菜单带层级轨迹)/ 删除(分类连同其下收藏);点击收藏即扫描(缓存优先),目录已失效时提示并可一键清理;收藏树与分类展开状态持久化,重启不丢
 - 拖拽文件夹到欢迎页、侧栏快速定位(主文件夹/下载/文稿/应用程序/各卷)
 - 支持命令行启动直达:`FolderSize --path ~/Downloads`
 
@@ -67,6 +68,7 @@ Sources/FolderSize/
 ├── DonutChart.swift       # Canvas 环形图 + 迷你占比条
 ├── SearchWindowView.swift # Everything 式搜索窗口
 ├── SearchSupport.swift    # FileRecord / SearchScope / 纯函数过滤器
+├── Favorites.swift        # 收藏夹树(多级分类)+ UserDefaults 持久化
 ├── IndexCache.swift       # .fsidx 二进制索引读写
 ├── WelcomeView.swift      # 欢迎页(拖拽区)
 ├── ScanStore.swift        # 扫描状态机 + 增量建树 + 索引/缓存

@@ -23,6 +23,7 @@ struct FolderSplitView: View {
 
 struct FolderTableView: View {
     @ObservedObject var store: ScanStore
+    @EnvironmentObject private var favorites: FavoritesStore
     @Environment(\.openWindow) private var openWindow
     let root: Node
     @Binding var selection: Node.ID?
@@ -75,6 +76,7 @@ struct FolderTableView: View {
 
     @ViewBuilder
     private func menu(for node: Node) -> some View {
+        addFavoriteMenu(node)
         Button("在此文件夹中搜索…") {
             openWindow(value: SearchScope(
                 rootPath: root.url.path,
@@ -92,6 +94,30 @@ struct FolderTableView: View {
         Divider()
         Button("以此文件夹为根重新扫描") {
             store.startScan(at: node.url)
+        }
+    }
+
+    /// 添加到收藏夹子菜单:顶层 / 已有分类(带轨迹)/ 新建分类并收藏进去
+    @ViewBuilder
+    private func addFavoriteMenu(_ node: Node) -> some View {
+        Menu {
+            Button("收藏到顶层") {
+                favorites.addFolder(name: node.name, path: node.url.path, into: nil)
+            }
+            ForEach(favorites.categories(), id: \.id) { cat in
+                Button(cat.title) {
+                    favorites.addFolder(name: node.name, path: node.url.path, into: cat.id)
+                }
+            }
+            Divider()
+            Button("新建分类…") {
+                if let name = promptText("新建分类", "分类名称,如:工作 / 视频"),
+                   let newID = favorites.addCategory(named: name, into: nil) {
+                    favorites.addFolder(name: node.name, path: node.url.path, into: newID)
+                }
+            }
+        } label: {
+            Label("添加到收藏夹", systemImage: "star")
         }
     }
 }
