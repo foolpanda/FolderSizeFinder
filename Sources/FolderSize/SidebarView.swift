@@ -82,7 +82,7 @@ struct SidebarView: View {
         let isCurrent = store.root?.url.standardizedFileURL.path
             == item.url.standardizedFileURL.path
         return Button {
-            store.openForBrowse(at: item.url)
+            store.openSmart(at: item.url)
         } label: {
             Label(item.name, systemImage: item.icon)
                 .foregroundStyle(isCurrent ? Color.accentColor : .primary)
@@ -141,7 +141,7 @@ private struct FavoriteBranch: View {
         .contextMenu { nodeMenu }
     }
 
-    /// 点击收藏 → 浏览模式打开(秒开,不统计);目录已不存在时提示并可一键清理
+    /// 点击收藏 → 智能打开(有缓存秒载大小,无缓存浏览模式);目录已不存在时提示并可一键清理
     private func open() {
         guard let url = node.url else { return }
         guard FileManager.default.fileExists(atPath: url.path) else {
@@ -155,7 +155,7 @@ private struct FavoriteBranch: View {
             }
             return
         }
-        store.openForBrowse(at: url)
+        store.openSmart(at: url)
     }
 
     // MARK: 右键菜单(分类与目录收藏通用)

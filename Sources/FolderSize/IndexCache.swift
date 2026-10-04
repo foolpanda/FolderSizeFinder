@@ -30,6 +30,11 @@ enum IndexCache {
         return directory.appendingPathComponent("\(name).fsidx")
     }
 
+    /// 该根目录是否已有缓存(供打开时决定直接载缓存还是进浏览模式)
+    static func exists(for root: URL) -> Bool {
+        FileManager.default.fileExists(atPath: cacheURL(for: root).path)
+    }
+
     // MARK: - 写
 
     static func write(url: URL, rootPath: String, savedAt: Date, events: [ScanEvent]) throws {

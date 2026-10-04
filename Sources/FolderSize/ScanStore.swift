@@ -55,17 +55,26 @@ final class ScanStore: ObservableObject {
         let args = CommandLine.arguments
         if let i = args.firstIndex(of: "--path"), i + 1 < args.count {
             let raw = (args[i + 1] as NSString).expandingTildeInPath
-            let url = URL(fileURLWithPath: raw)
-            // --scan:启动即统计;默认浏览模式(秒开,不统计)
+            // --scan:强制重新扫描刷新缓存;否则智能打开(有缓存秒载,无缓存浏览模式)
             if args.contains("--scan") {
-                startScan(at: url)
+                startScan(at: URL(fileURLWithPath: raw))
             } else {
-                openForBrowse(at: url)
+                openSmart(at: URL(fileURLWithPath: raw))
             }
         }
     }
 
     // MARK: - 控制
+
+    /// 智能打开:该目录已有缓存 → 直接秒载缓存显示 size/占比(状态栏标注缓存时间);
+    /// 没有缓存 → 浏览模式(只列顶层,秒开)。所有常规打开入口走这里。
+    func openSmart(at url: URL) {
+        if IndexCache.exists(for: url) {
+            startScan(at: url, preferCache: true)
+        } else {
+            openForBrowse(at: url)
+        }
+    }
 
     /// 浏览模式:只列出 url 的顶层子文件夹(同步、秒开),不统计大小。
     /// 所有"打开目录"的入口(侧栏 / 收藏夹 / 拖拽 / --path)默认走这里,
@@ -235,7 +244,7 @@ final class ScanStore: ObservableObject {
         panel.message = L.t("openpanel.message")
         panel.prompt = L.t("openpanel.prompt")
         if panel.runModal() == .OK, let url = panel.url {
-            openForBrowse(at: url)
+            openSmart(at: url)
         }
     }
 

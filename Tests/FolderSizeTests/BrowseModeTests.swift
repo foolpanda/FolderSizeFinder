@@ -97,6 +97,40 @@ final class BrowseModeTests: XCTestCase {
         store.cancelScan()
     }
 
+    /// 有缓存 → openSmart 直接载缓存显示大小;无缓存 → 浏览模式
+    func testOpenSmartUsesCacheWhenAvailable() async throws {
+        // 预写一份缓存:a 目录含一个 123 字节文件
+        let events: [ScanEvent] = [
+            ScanEvent(path: "a", isDirectory: true, logical: 0, allocated: 0),
+            ScanEvent(path: "a/f.txt", isDirectory: false, logical: 123, allocated: 4096),
+        ]
+        try IndexCache.write(
+            url: IndexCache.cacheURL(for: rootURL),
+            rootPath: rootURL.path, savedAt: Date(), events: events)
+        defer { try? FileManager.default.removeItem(at: IndexCache.cacheURL(for: rootURL)) }
+
+        let store = ScanStore()
+        XCTAssertTrue(IndexCache.exists(for: rootURL))
+        store.openSmart(at: rootURL)
+        for _ in 0..<50 {
+            if !store.isScanning && !store.browseOnly { break }
+            try await Task.sleep(nanoseconds: 100_000_000)
+        }
+        XCTAssertFalse(store.browseOnly)          // 不进浏览模式,直接出大小
+        XCTAssertFalse(store.isScanning)          // 没有真扫描
+        XCTAssertNotNil(store.loadedFromCache)    // 标注来自缓存
+        XCTAssertEqual(store.root?.sorted.map(\.name), ["a"])
+        XCTAssertEqual(store.root?.sorted.first?.size(.logical), 123)
+    }
+
+    func testOpenSmartFallsBackToBrowseWithoutCache() {
+        let store = ScanStore()
+        XCTAssertFalse(IndexCache.exists(for: rootURL))
+        store.openSmart(at: rootURL)
+        XCTAssertTrue(store.browseOnly)
+        XCTAssertEqual(store.root?.sorted.count, 4)
+    }
+
     func testEnterSubFolderBrowsesDeeper() {
         let store = ScanStore()
         store.openForBrowse(at: rootURL)
