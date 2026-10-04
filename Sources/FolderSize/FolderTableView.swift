@@ -127,10 +127,12 @@ struct FolderTableView: NSViewRepresentable {
 
         private var store: ScanStore { parent.store }
 
-        /// 行的子目录;浏览模式下未列出的目录在查询时同步 readdir(懒加载)
+        /// 行的子目录;浏览模式 readdir 懒加载,统计懒加载从聚合索引物化
         private func children(of node: Node) -> [Node] {
-            if store.browseOnly && node.browsePending {
-                store.browseListIfNeeded(node)
+            if store.browseOnly {
+                if node.browsePending { store.browseListIfNeeded(node) }
+            } else {
+                store.materializeLazyIfNeeded(node)
             }
             return node.sorted
         }

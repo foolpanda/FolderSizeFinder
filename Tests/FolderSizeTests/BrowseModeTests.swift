@@ -97,12 +97,42 @@ final class BrowseModeTests: XCTestCase {
         store.cancelScan()
     }
 
-    /// 有缓存 → openSmart 直接载缓存显示大小;无缓存 → 浏览模式
-    func testOpenSmartUsesCacheWhenAvailable() async throws {
-        // 预写一份缓存:a 目录含一个 123 字节文件
+    /// 聚合索引:先序事件 → 目录聚合(一遍扫描,无建树)
+    func testAggregate() {
         let events: [ScanEvent] = [
             ScanEvent(path: "a", isDirectory: true, logical: 0, allocated: 0),
-            ScanEvent(path: "a/f.txt", isDirectory: false, logical: 123, allocated: 4096),
+            ScanEvent(path: "a/sub", isDirectory: true, logical: 0, allocated: 0),
+            ScanEvent(path: "a/sub/f.bin", isDirectory: false, logical: 100, allocated: 4096),
+            ScanEvent(path: "b", isDirectory: true, logical: 0, allocated: 0),
+            ScanEvent(path: "root.txt", isDirectory: false, logical: 23, allocated: 8),
+        ]
+        let agg = ScanStore.aggregate(events)
+        XCTAssertEqual(agg.totalFiles, 2)
+        XCTAssertEqual(agg.totalAllocated, 4104)
+        XCTAssertEqual(agg.index[""]?.logical, 123)          // 根 = 全部后代
+        XCTAssertEqual(agg.index[""]?.totalFiles, 2)
+        XCTAssertEqual(agg.index[""]?.dirs, 2)
+        XCTAssertEqual(agg.index[""]?.directFiles, 1)        // 根直接文件 root.txt
+        XCTAssertEqual(agg.index["a"]?.logical, 100)
+        XCTAssertEqual(agg.index["a"]?.allocated, 4096)
+        XCTAssertEqual(agg.index["a"]?.totalFiles, 1)
+        XCTAssertEqual(agg.index["a"]?.dirs, 1)
+        XCTAssertEqual(agg.index["a"]?.childPaths, ["a/sub"])
+        XCTAssertEqual(agg.index["a/sub"]?.logical, 100)
+        XCTAssertEqual(agg.index["a/sub"]?.dirs, 0)
+        XCTAssertEqual(agg.index["b"]?.logical, 0)
+        XCTAssertEqual(agg.topFiles.map(\.logical), [100, 23]) // 按大小降序
+    }
+
+    /// 有缓存 → openSmart 秒出顶层(浏览式),后台水合注入大小;
+    /// 展开时才物化该层孩子
+    func testOpenSmartUsesCacheWhenAvailable() async throws {
+        let events: [ScanEvent] = [
+            ScanEvent(path: "a", isDirectory: true, logical: 0, allocated: 0),
+            ScanEvent(path: "a/sub", isDirectory: true, logical: 0, allocated: 0),
+            ScanEvent(path: "a/sub/f.bin", isDirectory: false, logical: 100, allocated: 4096),
+            ScanEvent(path: "b", isDirectory: true, logical: 0, allocated: 0),
+            ScanEvent(path: "root.txt", isDirectory: false, logical: 23, allocated: 8),
         ]
         try IndexCache.write(
             url: IndexCache.cacheURL(for: rootURL),
@@ -113,14 +143,35 @@ final class BrowseModeTests: XCTestCase {
         XCTAssertTrue(IndexCache.exists(for: rootURL))
         store.openSmart(at: rootURL)
         for _ in 0..<50 {
-            if !store.isScanning && !store.browseOnly { break }
+            if !store.browseOnly && store.loadedFromCache != nil { break }
             try await Task.sleep(nanoseconds: 100_000_000)
         }
-        XCTAssertFalse(store.browseOnly)          // 不进浏览模式,直接出大小
+        XCTAssertFalse(store.browseOnly)          // 水合完成,进入统计视图
         XCTAssertFalse(store.isScanning)          // 没有真扫描
-        XCTAssertNotNil(store.loadedFromCache)    // 标注来自缓存
-        XCTAssertEqual(store.root?.sorted.map(\.name), ["a"])
-        XCTAssertEqual(store.root?.sorted.first?.size(.logical), 123)
+        XCTAssertNotNil(store.loadedFromCache)
+        XCTAssertFalse(store.hydratingForTest)
+        // 顶层:只剩文件夹行,大小来自聚合
+        XCTAssertEqual(store.root?.sorted.map(\.name), ["a", "b"])
+        XCTAssertEqual(store.root?.logical, 123)
+        XCTAssertEqual(store.root?.files, 2)
+        let a = store.root!.sorted.first { $0.name == "a" }!
+        XCTAssertEqual(a.logical, 100)
+        XCTAssertEqual(a.files, 1)   // 后代文件数
+        XCTAssertEqual(a.dirs, 1)
+        XCTAssertTrue(a.browsePending)            // 孩子未物化
+        XCTAssertEqual(store.indexCount, 5)       // 搜索索引就绪
+        XCTAssertEqual(store.topFiles.count, 2)
+
+        // 展开 a:从聚合索引物化 sub
+        store.materializeLazyIfNeeded(a)
+        XCTAssertFalse(a.browsePending)
+        XCTAssertEqual(a.sorted.map(\.name), ["sub"])
+        XCTAssertEqual(a.sorted.first?.logical, 100)
+        // 展开 sub:无子目录,不可再展开
+        let sub = a.sorted.first!
+        store.materializeLazyIfNeeded(sub)
+        XCTAssertTrue(sub.sorted.isEmpty)
+        XCTAssertFalse(sub.browsePending)
     }
 
     func testOpenSmartFallsBackToBrowseWithoutCache() {

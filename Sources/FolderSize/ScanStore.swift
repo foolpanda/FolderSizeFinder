@@ -24,6 +24,75 @@ final class ScanStore: ObservableObject {
     /// 浏览模式:仅列出顶层文件夹,未统计大小(点「统计大小」/ 重新扫描才进入统计)
     @Published private(set) var browseOnly = false
 
+    // MARK: 缓存懒加载(水合)
+    //
+    // 打开有缓存的目录:先浏览式秒出顶层,后台只做一遍"聚合统计"
+    // (目录 → 直接子目录 / 数量 / 聚合大小),把 size/占比注入已显示的节点;
+    // 展开时才从聚合索引物化该层的孩子。没点开的子树不建任何 Node。
+
+    /// 一个目录的聚合数据(懒加载缓存索引的一行)
+    struct DirIndex {
+        var logical: Int64 = 0
+        var allocated: Int64 = 0
+        var totalFiles = 0      // 全部后代文件数(树表"文件"列口径)
+        var directFiles = 0     // 直接文件数
+        var dirs = 0            // 直接子文件夹数
+        var childPaths: [String] = [] // 直接子目录的相对路径
+    }
+
+    private var dirIndex: [String: DirIndex]?
+    private var hydrating = false
+
+    /// 测试观察:是否仍在水合
+    var hydratingForTest: Bool { hydrating }
+
+    /// 聚合:一遍先序扫描建立 目录→聚合 索引 + Top 大文件榜 + 总量。
+    /// 纯函数,后台线程调用。
+    nonisolated static func aggregate(
+        _ events: [ScanEvent]
+    ) -> (index: [String: DirIndex], topFiles: [FileHit], totalFiles: Int, totalAllocated: Int64) {
+        var index: [String: DirIndex] = ["": DirIndex()]
+        // 先序保证:文件/目录事件到达时其祖先链都在栈上(栈底为根)
+        var stack: [(key: String, depth: Int)] = [("", 0)]
+        var topFiles: [FileHit] = []
+        var minTop: Int64 = 0
+        var totalFiles = 0
+        var totalAllocated: Int64 = 0
+
+        for ev in events {
+            let depth = ev.path.split(separator: "/").count
+            // 目录和文件都要先弹栈:先序中父目录没有"关闭"事件,
+            // 下一个更浅深度的事件意味着它已结束(如目录后的顶层文件)
+            while stack.last!.depth >= depth { stack.removeLast() }
+            if ev.isDirectory {
+                let parent = stack.last!.key
+                index[parent, default: DirIndex()].dirs += 1
+                index[parent, default: DirIndex()].childPaths.append(ev.path)
+                if index[ev.path] == nil { index[ev.path] = DirIndex() }
+                stack.append((ev.path, depth))
+            } else {
+                totalFiles += 1
+                totalAllocated += ev.allocated
+                for ancestor in stack {
+                    index[ancestor.key, default: DirIndex()].logical += ev.logical
+                    index[ancestor.key, default: DirIndex()].allocated += ev.allocated
+                    index[ancestor.key, default: DirIndex()].totalFiles += 1
+                }
+                index[stack.last!.key, default: DirIndex()].directFiles += 1
+                if ev.logical > minTop || topFiles.count < 150 {
+                    topFiles.append(FileHit(
+                        path: ev.path, logical: ev.logical, allocated: ev.allocated))
+                    if topFiles.count > 400 {
+                        topFiles.sort { $0.logical > $1.logical }
+                        topFiles = Array(topFiles.prefix(150))
+                        minTop = topFiles.last?.logical ?? 0
+                    }
+                }
+            }
+        }
+        return (index, topFiles, totalFiles, totalAllocated)
+    }
+
     @Published var sizeMode: SizeMode = .allocated {
         didSet {
             guard !browseOnly else { return } // 浏览模式没有大小可排,避免打乱目录名序
@@ -66,14 +135,114 @@ final class ScanStore: ObservableObject {
 
     // MARK: - 控制
 
-    /// 智能打开:该目录已有缓存 → 直接秒载缓存显示 size/占比(状态栏标注缓存时间);
-    /// 没有缓存 → 浏览模式(只列顶层,秒开)。所有常规打开入口走这里。
+    /// 智能打开:有缓存 → 浏览式秒出顶层,后台聚合注入 size/占比(懒加载水合);
+    /// 无缓存 → 浏览模式。所有常规打开入口走这里。
     func openSmart(at url: URL) {
+        openForBrowse(at: url)
         if IndexCache.exists(for: url) {
-            startScan(at: url, preferCache: true)
-        } else {
-            openForBrowse(at: url)
+            hydrateFromCache(at: url)
         }
+    }
+
+    /// 后台解析缓存并聚合(不建树!只建 目录→聚合 索引),完成后把
+    /// size/占比注入已显示的顶层节点,并备好按需物化的聚合索引。
+    private func hydrateFromCache(at url: URL) {
+        hydrating = true
+        let cacheURL = IndexCache.cacheURL(for: url)
+        let gen = generation
+        Task.detached(priority: .userInitiated) { [weak self] in
+            guard let cached = IndexCache.read(url: cacheURL) else {
+                await self?.hydrateFailed(gen: gen)
+                return
+            }
+            let agg = ScanStore.aggregate(cached.events)
+            let records = cached.events.enumerated().map { i, ev in
+                FileRecord(
+                    id: i,
+                    relPath: ev.path,
+                    lowercasedPath: ev.path.lowercased(),
+                    isDirectory: ev.isDirectory,
+                    logical: ev.logical,
+                    allocated: ev.allocated
+                )
+            }
+            await self?.installHydration(
+                agg, records: records, savedAt: cached.savedAt, url: url, gen: gen)
+        }
+    }
+
+    private func hydrateFailed(gen: Int) {
+        guard gen == generation else { return }
+        hydrating = false // 解析失败:停留在浏览模式,用户可点「统计大小」真扫
+        objectWillChange.send()
+    }
+
+    @MainActor
+    private func installHydration(
+        _ agg: (index: [String: DirIndex], topFiles: [FileHit], totalFiles: Int, totalAllocated: Int64),
+        records: [FileRecord],
+        savedAt: Date,
+        url: URL,
+        gen: Int
+    ) {
+        guard gen == generation, hydrating, let root,
+              root.url.standardizedFileURL.path == url.standardizedFileURL.path else { return }
+        dirIndex = agg.index
+        hydrating = false
+        let rootAgg = agg.index[""] ?? DirIndex()
+
+        // 根与顶层目录:注入聚合大小(顶层文件行移除,统计树口径=文件夹)
+        root.logical = rootAgg.logical
+        root.allocated = rootAgg.allocated
+        root.files = rootAgg.totalFiles
+        root.dirs = rootAgg.dirs
+        root.browsePending = false
+        var topDirs: [Node] = []
+        for child in root.sorted where !child.isFile {
+            if let ci = agg.index[child.relPath] {
+                child.logical = ci.logical
+                child.allocated = ci.allocated
+                child.files = ci.totalFiles
+                child.dirs = ci.dirs
+                topDirs.append(child) // browsePending 保持 true,等展开时物化
+            }
+        }
+        root.sorted = topDirs.sorted { $0.size(sizeMode) > $1.size(sizeMode) }
+
+        topFiles = agg.topFiles
+        scannedFiles = agg.totalFiles
+        scannedBytes = agg.totalAllocated
+        loadedFromCache = savedAt
+        browseOnly = false
+        index = records
+        indexCount = records.count
+        errorCount = 0
+        lastError = nil
+        objectWillChange.send()
+    }
+
+    /// 统计懒加载:展开目录时从聚合索引物化该层的孩子(无 IO,微秒级)。
+    /// 未展开的子树不建任何 Node。由 NSOutlineView 数据源在展开/绘制时调用。
+    func materializeLazyIfNeeded(_ node: Node) {
+        guard !browseOnly, !hydrating, node.browsePending,
+              let index = dirIndex, let di = index[node.relPath] else { return }
+        node.browsePending = false
+        node.dirs = di.dirs
+        node.files = di.totalFiles
+        var kids: [Node] = []
+        for childPath in di.childPaths {
+            guard let ci = index[childPath] else { continue }
+            let name = (childPath as NSString).lastPathComponent
+            let child = Node(url: node.url.appendingPathComponent(name), relPath: childPath, parent: node)
+            child.logical = ci.logical
+            child.allocated = ci.allocated
+            child.files = ci.totalFiles
+            child.dirs = ci.dirs
+            child.browsePending = true
+            node.children[name] = child
+            kids.append(child)
+        }
+        node.sorted = kids.sorted { $0.size(sizeMode) > $1.size(sizeMode) }
     }
 
     /// 浏览模式:只列出 url 的顶层子文件夹(同步、秒开),不统计大小。
@@ -143,7 +312,7 @@ final class ScanStore: ObservableObject {
     /// 由 NSOutlineView 数据源在绘制/展开行时同步调用——AppKit 展开前必查询,
     /// 因此展开箭头永远是真实子节点,不存在"点了展开却没内容"的时序问题
     func browseListIfNeeded(_ node: Node) {
-        guard browseOnly, node.browsePending else { return }
+        guard browseOnly, !hydrating, node.browsePending else { return } // 水合期间不 readdir,等聚合注入
         listChildren(of: node)
     }
 
