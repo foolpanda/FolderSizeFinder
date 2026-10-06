@@ -43,6 +43,11 @@ final class ScanStore: ObservableObject {
     private var dirIndex: [String: DirIndex]?
     private var hydrating = false
 
+    /// 后台"仅建索引"扫描进行中(不重建可视树,搜索结果随进度实时流入)
+    private var backgroundScan = false
+    /// 后台扫描攒出的新快照索引(完成时整体替换 index,搜索结果按路径合并到新快照)
+    private var freshIndex: [FileRecord] = []
+
     /// 测试观察:是否仍在水合
     var hydratingForTest: Bool { hydrating }
 
@@ -187,35 +192,51 @@ final class ScanStore: ObservableObject {
     ) {
         guard gen == generation, hydrating, let root,
               root.url.standardizedFileURL.path == url.standardizedFileURL.path else { return }
-        dirIndex = agg.index
         hydrating = false
-        let rootAgg = agg.index[""] ?? DirIndex()
+        injectAggregation(agg, savedAt: savedAt, rootURL: url)
+        index = records
+        indexCount = records.count
+        objectWillChange.send()
+    }
 
-        // 根与顶层目录:注入聚合大小(顶层文件行移除,统计树口径=文件夹)
-        root.logical = rootAgg.logical
-        root.allocated = rootAgg.allocated
-        root.files = rootAgg.totalFiles
-        root.dirs = rootAgg.dirs
-        root.browsePending = false
-        var topDirs: [Node] = []
-        for child in root.sorted where !child.isFile {
-            if let ci = agg.index[child.relPath] {
-                child.logical = ci.logical
-                child.allocated = ci.allocated
-                child.files = ci.totalFiles
-                child.dirs = ci.dirs
-                topDirs.append(child) // browsePending 保持 true,等展开时物化
+    /// 把聚合结果注入**当前已显示的浏览树**(不重建):
+    /// 已 readdir 物化的层级 → 原地更新大小并按大小重排(保留节点身份/展开状态);
+    /// 未物化的层级 → 保持 pending,展开时从 dirIndex 物化。
+    @MainActor
+    private func injectAggregation(
+        _ agg: (index: [String: DirIndex], topFiles: [FileHit], totalFiles: Int, totalAllocated: Int64),
+        savedAt: Date?,
+        rootURL: URL
+    ) {
+        guard let root,
+              root.url.standardizedFileURL.path == rootURL.standardizedFileURL.path else { return }
+        dirIndex = agg.index
+
+        func inject(_ node: Node) {
+            guard let di = agg.index[node.relPath] else { return }
+            node.logical = di.logical
+            node.allocated = di.allocated
+            node.files = di.totalFiles
+            node.dirs = di.dirs
+            // 只有已 readdir 物化的节点(children 非空)才清 pending 并递归注入孩子;
+            // 未物化的保持 pending,展开时从聚合索引物化(保持节点身份/展开状态)
+            guard !node.children.isEmpty else { return }
+            node.browsePending = false
+            var dirKids: [Node] = []
+            for child in node.sorted where !child.isFile {
+                guard agg.index[child.relPath] != nil else { continue } // 磁盘有但缓存无(扫描后新建)→ 统计视图不显示
+                inject(child)
+                dirKids.append(child)
             }
+            node.sorted = dirKids.sorted { $0.size(sizeMode) > $1.size(sizeMode) }
         }
-        root.sorted = topDirs.sorted { $0.size(sizeMode) > $1.size(sizeMode) }
+        inject(root)
 
         topFiles = agg.topFiles
         scannedFiles = agg.totalFiles
         scannedBytes = agg.totalAllocated
         loadedFromCache = savedAt
         browseOnly = false
-        index = records
-        indexCount = records.count
         errorCount = 0
         lastError = nil
         objectWillChange.send()
@@ -245,12 +266,119 @@ final class ScanStore: ObservableObject {
         node.sorted = kids.sorted { $0.size(sizeMode) > $1.size(sizeMode) }
     }
 
+    /// 输入搜索词时调用:cache1 命中立即显示(已在内存),同时后台扫描刷新,
+    /// 完成后原子重建缓存并整体切换搜索索引(按路径合并到新快照)。
+    /// cache 新鲜(60s 内)则跳过,避免重复大扫描。
+    func startSearchDrivenIndexScanIfNeeded() {
+        guard let url = root?.url else { return }
+        guard !isScanning, !hydrating, !backgroundScan else { return }
+        if let mtime = IndexCache.modificationDate(for: url),
+           Date().timeIntervalSince(mtime) < 60 { return }
+        startBackgroundIndexScan(at: url)
+    }
+
+    /// 后台"仅建索引"扫描:不动可视树(用户继续浏览),攒事件流供
+    /// ① 搜索索引逐批可见 ② 完成后原子重建缓存 ③ 聚合注入大小。
+    func startBackgroundIndexScan(at url: URL) {
+        scanTask?.cancel()
+        generation += 1
+        let gen = generation
+        backgroundScan = true
+        isScanning = true
+        wasCancelled = false
+        startedAt = Date()
+        elapsed = 0
+        topFiles = []
+        freshIndex = []
+        scannedFiles = 0
+        scannedBytes = 0
+        errorCount = 0
+        lastError = nil
+        loadedFromCache = nil
+        ticker?.cancel()
+        ticker = Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()
+            .sink { [weak self] _ in
+                Task { @MainActor in self?.tickElapsed() }
+            }
+
+        let hidden = includeHidden
+        let cacheURL = IndexCache.cacheURL(for: url)
+        scanTask = Task.detached(priority: .userInitiated) { [weak self] in
+            let errors = await DirectoryScanner.scan(root: url, includeHidden: hidden) { [weak self] batch in
+                await self?.applyIndexBatch(batch, generation: gen)
+            }
+            await self?.finishBackgroundIndexScan(
+                errorCount: errors, generation: gen, rootURL: url, cacheURL: cacheURL)
+        }
+    }
+
+    private func applyIndexBatch(_ batch: [ScanEvent], generation gen: Int) {
+        guard gen == generation, backgroundScan else { return }
+        var nextID = freshIndex.count
+        for ev in batch {
+            freshIndex.append(FileRecord(
+                id: nextID,
+                relPath: ev.path,
+                lowercasedPath: ev.path.lowercased(),
+                isDirectory: ev.isDirectory,
+                logical: ev.logical,
+                allocated: ev.allocated
+            ))
+            nextID += 1
+            if !ev.isDirectory {
+                scannedFiles += 1
+                scannedBytes += ev.allocated
+            }
+        }
+        objectWillChange.send() // 状态栏进度;indexCount 未变,当前搜索结果保持稳定
+    }
+
+    private func finishBackgroundIndexScan(
+        errorCount errs: Int,
+        generation gen: Int,
+        rootURL url: URL,
+        cacheURL: URL
+    ) {
+        guard gen == generation, backgroundScan else { return }
+        isScanning = false
+        backgroundScan = false
+        elapsed = startedAt.map { Date().timeIntervalSince($0) } ?? elapsed
+        errorCount = errs
+        ticker?.cancel()
+        ticker = nil
+
+        // 搜索索引整体切换到新快照 → onChange(indexCount) 用同一关键词重跑,
+        // 结果按路径合并呈现(新增出现/已删消失/同名取新大小)
+        index = freshIndex
+        indexCount = freshIndex.count
+        freshIndex = []
+        let events = index.map {
+            ScanEvent(path: $0.relPath, isDirectory: $0.isDirectory,
+                      logical: $0.logical, allocated: $0.allocated)
+        }
+        let agg = ScanStore.aggregate(events)
+
+        // 原子重建缓存(后台线程):整份快照替换,不做增量合并
+        let savedAt = Date()
+        let rootPath = url.standardizedFileURL.path
+        Task.detached(priority: .utility) {
+            try? IndexCache.write(url: cacheURL, rootPath: rootPath, savedAt: savedAt, events: events)
+        }
+
+        injectAggregation(agg, savedAt: nil, rootURL: url) // savedAt=nil:数据是刚扫的,非缓存
+        topFiles.sort { $0.logical > $1.logical }
+        topFiles = Array(topFiles.prefix(150))
+        objectWillChange.send()
+    }
+
     /// 浏览模式:只列出 url 的顶层子文件夹(同步、秒开),不统计大小。
     /// 所有"打开目录"的入口(侧栏 / 收藏夹 / 拖拽 / --path)默认走这里,
     /// 需要大小数据时再点「统计大小」或 ⌘R 进入统计。
     func openForBrowse(at url: URL) {
         scanTask?.cancel()
         generation += 1
+        backgroundScan = false
+        freshIndex = []
 
         let node = Node(url: url, relPath: "")
         listChildren(of: node)
@@ -488,6 +616,8 @@ final class ScanStore: ObservableObject {
         stack = [node]
         dirty = []
         browseOnly = false
+        backgroundScan = false
+        freshIndex = []
         topFiles = []
         minTopSize = 0
         index = []

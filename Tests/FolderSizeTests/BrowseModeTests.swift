@@ -182,6 +182,103 @@ final class BrowseModeTests: XCTestCase {
         XCTAssertEqual(store.root?.sorted.count, 4)
     }
 
+    /// 搜索驱动的后台索引扫描:无缓存浏览 → 触发 → 索引实时增长 →
+    /// 完成后缓存原子重建 + 大小注入浏览树(不重建树)
+    func testSearchDrivenBackgroundIndexScan() async throws {
+        // 夹具:根下 a/(含 sub/f.bin 100B)+ root.txt 23B
+        let store = ScanStore()
+        store.openSmart(at: rootURL) // 无缓存 → 浏览模式
+        XCTAssertTrue(store.browseOnly)
+
+        store.startSearchDrivenIndexScanIfNeeded() // 模拟首输入
+        XCTAssertTrue(store.isScanning)
+
+        // 等扫描完成
+        for _ in 0..<100 {
+            if !store.isScanning { break }
+            try await Task.sleep(nanoseconds: 100_000_000)
+        }
+        XCTAssertFalse(store.isScanning)
+        XCTAssertFalse(store.browseOnly)        // 注入完成,进入统计视图
+        XCTAssertNil(store.loadedFromCache)     // 数据是刚扫的,不是缓存
+        XCTAssertEqual(store.indexCount, 5)     // a, a/sub, b, .hiddendir, f.txt
+        XCTAssertEqual(store.scannedFiles, 1)   // 只有 f.txt
+        XCTAssertEqual(store.root?.logical, 1)  // "x" = 1 字节
+        XCTAssertEqual(store.root?.files, 1)
+
+        // 缓存已原子重建:读回应含 5 条事件,rootPath 正确
+        let cached = IndexCache.read(url: IndexCache.cacheURL(for: rootURL))
+        XCTAssertEqual(cached?.events.count, 5)
+        XCTAssertEqual(cached?.rootPath, rootURL.standardizedFileURL.path)
+        try? FileManager.default.removeItem(at: IndexCache.cacheURL(for: rootURL))
+    }
+
+    /// 已有 cache1 且陈旧 → 输入触发后台刷新,完成后索引切换到新快照(cache2),
+    /// 缓存文件原子替换,浏览树大小同步注入
+    func testSearchDrivenScanRefreshesStaleCache() async throws {
+        // cache1:陈旧快照(含一个磁盘上已不存在的 a/ghost.txt,以及 a/)
+        let stale: [ScanEvent] = [
+            ScanEvent(path: "a", isDirectory: true, logical: 0, allocated: 0),
+            ScanEvent(path: "a/ghost.txt", isDirectory: false, logical: 999, allocated: 4096),
+        ]
+        try IndexCache.write(
+            url: IndexCache.cacheURL(for: rootURL),
+            rootPath: rootURL.path, savedAt: Date(), events: stale)
+        // 把缓存 mtime 拨旧,模拟陈旧
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date(timeIntervalSinceNow: -3600)],
+            ofItemAtPath: IndexCache.cacheURL(for: rootURL).path)
+
+        let store = ScanStore()
+        store.openSmart(at: rootURL) // 水合:索引=cache1(含 ghost)
+        for _ in 0..<50 {
+            if store.loadedFromCache != nil { break }
+            try await Task.sleep(nanoseconds: 100_000_000)
+        }
+        XCTAssertEqual(store.indexCount, 2)
+        XCTAssertTrue(store.index.contains { $0.relPath == "a/ghost.txt" }) // cache1 命中可见
+
+        store.startSearchDrivenIndexScanIfNeeded() // 陈旧 → 触发后台刷新
+        XCTAssertTrue(store.isScanning)
+        for _ in 0..<100 {
+            if !store.isScanning { break }
+            try await Task.sleep(nanoseconds: 100_000_000)
+        }
+        // cache2(新快照)合并呈现:ghost 消失(磁盘已删),真实文件出现
+        XCTAssertEqual(store.indexCount, 5) // a, a/sub, b, .hiddendir, f.txt
+        XCTAssertFalse(store.index.contains { $0.relPath == "a/ghost.txt" })
+        XCTAssertTrue(store.index.contains { $0.relPath == "f.txt" })
+        XCTAssertNil(store.loadedFromCache)
+        XCTAssertEqual(store.root?.logical, 1)
+        // 缓存文件已被 cache2 原子替换(mtime 变新)
+        let mtime = IndexCache.modificationDate(for: rootURL)!
+        XCTAssertGreaterThan(Date().timeIntervalSince(mtime), 0)
+        XCTAssertLessThan(Date().timeIntervalSince(mtime), 60)
+        try? FileManager.default.removeItem(at: IndexCache.cacheURL(for: rootURL))
+    }
+
+    /// cache1 新鲜(60s 内)→ 输入不触发重复扫描
+    func testSearchDrivenScanSkippedWhenCacheFresh() async throws {
+        let events: [ScanEvent] = [
+            ScanEvent(path: "a", isDirectory: true, logical: 0, allocated: 0),
+            ScanEvent(path: "a/f.txt", isDirectory: false, logical: 50, allocated: 100),
+        ]
+        try IndexCache.write(
+            url: IndexCache.cacheURL(for: rootURL),
+            rootPath: rootURL.path, savedAt: Date(), events: events)
+        defer { try? FileManager.default.removeItem(at: IndexCache.cacheURL(for: rootURL)) }
+
+        let store = ScanStore()
+        store.openSmart(at: rootURL)
+        for _ in 0..<50 {
+            if store.loadedFromCache != nil { break }
+            try await Task.sleep(nanoseconds: 100_000_000)
+        }
+        store.startSearchDrivenIndexScanIfNeeded() // 新鲜缓存 → no-op
+        XCTAssertFalse(store.isScanning)
+        XCTAssertEqual(store.indexCount, 2)
+    }
+
     func testEnterSubFolderBrowsesDeeper() {
         let store = ScanStore()
         store.openForBrowse(at: rootURL)

@@ -45,7 +45,13 @@ struct SearchWindowView: View {
             store.ensureSearchIndex() // 浏览模式:有缓存则后台装进搜索索引
             runSearch()
         }
-        .onChange(of: query) { _, _ in runSearch() }
+        .onChange(of: query) { _, _ in
+            store.startSearchDrivenIndexScanIfNeeded() // 无缓存时首输入即后台建索引
+            runSearch()
+        }
+        .onChange(of: store.isScanning) { _, scanning in
+            if !scanning { runSearch() } // 后台刷新扫描结束:同一关键词在新快照上重跑
+        }
         .onChange(of: sortKey) { _, _ in runSearch() }
         .onChange(of: descending) { _, _ in runSearch() }
         .onChange(of: store.indexCount) { _, _ in runSearch() } // 扫描进行中持续更新
@@ -170,12 +176,14 @@ struct SearchWindowView: View {
     private var content: some View {
         if !scopeValid {
             hint(L.f("search.rootChanged", scope.rootPath))
-        } else if store.browseOnly && store.indexCount == 0 && !store.isScanning {
-            hint(L.t("search.needIndex"))
         } else if queryTrimmed.isEmpty {
             hint(L.t("search.browseHint"))
         } else if result.isEmpty {
-            hint(store.isScanning ? L.t("search.searching") : L.t("search.noMatch"))
+            if store.isScanning && store.indexCount == 0 {
+                hint(L.t("search.indexing")) // 后台扫描建索引中
+            } else {
+                hint(store.isScanning ? L.t("search.searching") : L.t("search.noMatch"))
+            }
         } else {
             Table(result, selection: $selection) {
                 TableColumn(L.t("col.name")) { rec in

@@ -35,6 +35,12 @@ enum IndexCache {
         FileManager.default.fileExists(atPath: cacheURL(for: root).path)
     }
 
+    /// 缓存的修改时间(nil = 无缓存)——供"新鲜度"判断决定是否需要后台刷新
+    static func modificationDate(for root: URL) -> Date? {
+        try? FileManager.default.attributesOfItem(
+            atPath: cacheURL(for: root).path)[.modificationDate] as? Date
+    }
+
     // MARK: - 写
 
     static func write(url: URL, rootPath: String, savedAt: Date, events: [ScanEvent]) throws {
