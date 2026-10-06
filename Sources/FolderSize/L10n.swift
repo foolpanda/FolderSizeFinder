@@ -217,7 +217,6 @@ enum L {
         "search.examplesTitle": ["zh": "点击示例填入搜索框(覆盖常用场景):", "en": "Click an example to fill the search box:"],
         "search.recent": ["zh": "最近搜索:", "en": "Recent:"],
         "search.rootChanged": ["zh": "根目录已变更(%@)\n请回到主窗口重新打开搜索", "en": "Root has changed (%@)\nReopen search from the main window"],
-        "search.needIndex": ["zh": "还没有可搜索的索引\n输入关键词将自动在后台扫描建立索引,结果随扫描实时出现", "en": "No search index yet\nTyping starts a background scan automatically; results stream in as it goes"],
         "search.browseHint": ["zh": "点\"搜索示例\"浮出面板参考写法,或直接输入关键词\n空格分隔多个关键词(AND),按相对路径匹配,输入即出结果", "en": "Open “Examples” for samples, or just type\nSpace separates keywords (AND); matches relative paths as you type"],
         "search.searching": ["zh": "搜索中…", "en": "Searching…"],
         "search.indexing": ["zh": "正在后台扫描建立索引,结果将随扫描实时出现…", "en": "Building the index in the background — results will stream in…"],

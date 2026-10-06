@@ -228,7 +228,11 @@ final class ScanStore: ObservableObject {
                 inject(child)
                 dirKids.append(child)
             }
-            node.sorted = dirKids.sorted { $0.size(sizeMode) > $1.size(sizeMode) }
+            // 顺序未变时跳过赋值,避免大树上无谓触发 NSTableView diff
+            let newOrder = dirKids.sorted { $0.size(sizeMode) > $1.size(sizeMode) }
+            if newOrder.map(\.id) != node.sorted.map(\.id) {
+                node.sorted = newOrder
+            }
         }
         inject(root)
 
@@ -268,12 +272,12 @@ final class ScanStore: ObservableObject {
 
     /// 输入搜索词时调用:cache1 命中立即显示(已在内存),同时后台扫描刷新,
     /// 完成后原子重建缓存并整体切换搜索索引(按路径合并到新快照)。
-    /// cache 新鲜(60s 内)则跳过,避免重复大扫描。
+    /// cache 新鲜(300s 内)则跳过,避免长输入会话中链式重复大扫描。
     func startSearchDrivenIndexScanIfNeeded() {
         guard let url = root?.url else { return }
         guard !isScanning, !hydrating, !backgroundScan else { return }
         if let mtime = IndexCache.modificationDate(for: url),
-           Date().timeIntervalSince(mtime) < 60 { return }
+           Date().timeIntervalSince(mtime) < 300 { return }
         startBackgroundIndexScan(at: url)
     }
 
