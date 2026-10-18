@@ -4,15 +4,17 @@ import AppKit
 struct FolderSplitView: View {
     @ObservedObject var store: ScanStore
     let root: Node
-    @Binding var selection: Node.ID?
+    @Binding var selection: Set<Node.ID>
+    @Binding var primary: Node.ID?
 
     private var selectedNode: Node? {
-        selection.flatMap { Node.find($0, in: root) } ?? root
+        // 多选时详情面板仍展示“主选中项”(树表里跟踪的第一选中行),不跳回根目录
+        primary.flatMap { Node.find($0, in: root) }
     }
 
     var body: some View {
         HSplitView {
-            FolderTableView(store: store, root: root, selection: $selection)
+            FolderTableView(store: store, root: root, selection: $selection, primary: $primary)
                 .frame(minWidth: 440)
                 .layoutPriority(1)
                 .safeAreaInset(edge: .top, spacing: 0) {
@@ -56,7 +58,8 @@ struct FolderTableView: NSViewRepresentable {
     @EnvironmentObject var launchers: LauncherStore
     @Environment(\.openWindow) private var openWindow
     let root: Node
-    @Binding var selection: Node.ID?
+    @Binding var selection: Set<Node.ID>
+    @Binding var primary: Node.ID?
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -67,6 +70,7 @@ struct FolderTableView: NSViewRepresentable {
         outline.indentationPerLevel = 12
         outline.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
         outline.autoresizesOutlineColumn = true
+        outline.allowsMultipleSelection = true // 支持选中两个文件做比较 / 多图连播
 
         let name = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("name"))
         name.title = L.t("col.name")
@@ -245,7 +249,12 @@ struct FolderTableView: NSViewRepresentable {
 
         func outlineViewSelectionDidChange(_ notification: Notification) {
             guard let outline else { return }
-            parent.selection = (outline.item(atRow: outline.selectedRow) as? Node)?.id
+            let ids = outline.selectedRowIndexes.compactMap {
+                (outline.item(atRow: $0) as? Node)?.id
+            }
+            parent.selection = Set(ids)
+            // 第一选中行作为详情面板的主选中项
+            parent.primary = (outline.item(atRow: outline.selectedRow) as? Node)?.id
         }
 
         @objc func doubleClick(_ sender: Any) {
@@ -265,20 +274,31 @@ struct FolderTableView: NSViewRepresentable {
             if store.isScanning, now.timeIntervalSince(lastReload) < 0.15 { return }
             lastReload = now
             outline.reloadData()
+            // reloadData 后按 Node 身份恢复多选,避免扫描刷新把选中清空
+            applySelection()
         }
 
         func syncSelection() {
             guard let outline else { return }
-            let current = (outline.item(atRow: outline.selectedRow) as? Node)?.id
+            let current = Set(outline.selectedRowIndexes.compactMap {
+                (outline.item(atRow: $0) as? Node)?.id
+            })
             guard current != parent.selection else { return }
-            if let id = parent.selection, let node = Node.find(id, in: parent.root) {
-                let row = outline.row(forItem: node)
-                if row >= 0 {
-                    outline.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
-                    return
+            applySelection()
+        }
+
+        /// 把 parent.selection 里的节点映射回行并选中(按 Node 身份,跨 reloadData 稳定)
+        private func applySelection() {
+            guard let outline else { return }
+            var indexes = IndexSet()
+            for id in parent.selection {
+                if let node = Node.find(id, in: parent.root) {
+                    let row = outline.row(forItem: node)
+                    if row >= 0 { indexes.insert(row) }
                 }
             }
-            outline.deselectAll(nil)
+            guard indexes != outline.selectedRowIndexes else { return }
+            outline.selectRowIndexes(indexes, byExtendingSelection: false)
         }
 
         // MARK: 右键菜单
@@ -287,112 +307,33 @@ struct FolderTableView: NSViewRepresentable {
             menu.removeAllItems()
             guard let outline,
                   outline.clickedRow >= 0,
-                  let node = outline.item(atRow: outline.clickedRow) as? Node else { return }
+                  let clicked = outline.item(atRow: outline.clickedRow) as? Node else { return }
+
+            // 右键点中的行若不在当前多选里,就当作单选该行
+            var nodes = outline.selectedRowIndexes.compactMap {
+                outline.item(atRow: $0) as? Node
+            }
+            if !outline.selectedRowIndexes.contains(outline.clickedRow) {
+                nodes = [clicked]
+            }
+            guard !nodes.isEmpty else { return }
+
             let scope = SearchScope(
                 rootPath: parent.root.url.path,
-                prefix: node.relPath,
-                scopeName: node.name
+                prefix: clicked.relPath,
+                scopeName: clicked.name
             )
-            FolderTreeMenuBuilder.build(
-                menu: menu, node: node,
-                store: store, favorites: parent.favorites,
-                launchers: parent.launchers,
+            let entries = FileMenuFactory.treeEntries(
+                nodes: nodes, primary: clicked, store: store,
+                favorites: parent.favorites, launchers: parent.launchers,
                 openSearch: { [openWindow = parent.openWindow] in
                     openWindow(value: scope)
+                },
+                openImagePreview: { [openWindow = parent.openWindow] url in
+                    openWindow(value: ImagePreviewScope(filePath: url.path))
                 }
             )
-        }
-    }
-}
-
-// MARK: - 树表右键菜单(NSMenu 版,与侧栏菜单逻辑一致)
-
-@MainActor
-enum FolderTreeMenuBuilder {
-    /// 持有闭包的菜单项目标:item.target = box,点击回调 handler
-    final class ActionBox: NSObject {
-        let handler: () -> Void
-        init(_ handler: @escaping () -> Void) { self.handler = handler }
-        @objc func run(_ sender: NSMenuItem) { handler() }
-    }
-
-    static func item(_ title: String, _ handler: @escaping () -> Void) -> NSMenuItem {
-        let item = NSMenuItem(title: title, action: #selector(ActionBox.run(_:)), keyEquivalent: "")
-        let box = ActionBox(handler)
-        item.target = box
-        item.representedObject = box // 保活,防止 target 释放
-        return item
-    }
-
-    static func build(
-        menu: NSMenu, node: Node, store: ScanStore,
-        favorites: FavoritesStore, launchers: LauncherStore,
-        openSearch: @escaping () -> Void
-    ) {
-        // 打开方式
-        menu.addItem(item(L.t("tree.reveal")) {
-            NSWorkspace.shared.activateFileViewerSelecting([node.url])
-        })
-        menu.addItem(item(L.t("tree.openTerminal")) {
-            LauncherStore.openTerminal(at: node.url)
-        })
-        for launcher in launchers.customs {
-            menu.addItem(item(launcher.name) {
-                LauncherStore.runInTerminal(path: node.url.path, command: launcher.command)
-            })
-        }
-        if !launchers.customs.isEmpty { menu.addItem(.separator()) }
-        menu.addItem(item(L.t("launch.add")) {
-            if let name = promptText(L.t("launch.add.name"), L.t("launch.add.name.ph")),
-               let command = promptText(L.t("launch.add.cmd"), L.t("launch.add.cmd.ph")) {
-                launchers.add(name: name, command: command)
-            }
-        })
-        if !launchers.customs.isEmpty {
-            let remove = NSMenu(title: L.t("launch.remove"))
-            for launcher in launchers.customs {
-                remove.addItem(item(launcher.name) { launchers.remove(id: launcher.id) })
-            }
-            let removeItem = NSMenuItem(title: L.t("launch.remove"), action: nil, keyEquivalent: "")
-            removeItem.submenu = remove
-            menu.addItem(removeItem)
-        }
-
-        // 收藏夹
-        let fav = NSMenu(title: L.t("fav.add"))
-        fav.addItem(item(L.t("fav.addTop")) {
-            favorites.addFolder(name: node.name, path: node.url.path, into: nil)
-        })
-        for cat in favorites.categories() {
-            fav.addItem(item(cat.title) {
-                favorites.addFolder(name: node.name, path: node.url.path, into: cat.id)
-            })
-        }
-        fav.addItem(.separator())
-        fav.addItem(item(L.t("fav.newCategory")) {
-            if let name = promptText(L.t("fav.newCategory"), L.t("fav.newCategory.ph")),
-               let newID = favorites.addCategory(named: name, into: nil) {
-                favorites.addFolder(name: node.name, path: node.url.path, into: newID)
-            }
-        })
-        let favItem = NSMenuItem(title: L.t("fav.add"), action: nil, keyEquivalent: "")
-        favItem.submenu = fav
-        menu.addItem(favItem)
-
-        // 其他
-        menu.addItem(item(L.t("tree.search")) { openSearch() })
-        menu.addItem(item(L.t("tree.copyPath")) {
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(node.url.path, forType: .string)
-        })
-        menu.addItem(.separator())
-        if !node.isFile {
-            menu.addItem(item(L.t("tree.enter")) {
-                store.openForBrowse(at: node.url)
-            })
-            menu.addItem(item(store.browseOnly ? L.t("tree.sizeThis") : L.t("tree.rescanRoot")) {
-                store.startScan(at: node.url)
-            })
+            for entry in entries { menu.addItem(entry.nsMenuItem) }
         }
     }
 }

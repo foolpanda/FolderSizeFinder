@@ -13,6 +13,8 @@ enum DetailTab: String, CaseIterable, Identifiable {
 struct DetailPanel: View {
     @ObservedObject var store: ScanStore
     @Environment(\.openWindow) private var openWindow
+    @EnvironmentObject private var favorites: FavoritesStore
+    @EnvironmentObject private var launchers: LauncherStore
     let node: Node
 
     @State private var tab: DetailTab = .breakdown
@@ -245,9 +247,13 @@ struct DetailPanel: View {
                     .contextMenu {
                         if let rootURL = store.root?.url {
                             let url = rootURL.appendingPathComponent(hit.path)
-                            Button(L.t("tree.reveal")) {
-                                NSWorkspace.shared.activateFileViewerSelecting([url])
-                            }
+                            FileMenuContent(entries: FileMenuFactory.searchEntries(
+                                items: [FileItem(url: url, isDirectory: false)],
+                                launchers: launchers, favorites: favorites,
+                                openImagePreview: { [openWindow] previewURL in
+                                    openWindow(value: ImagePreviewScope(filePath: previewURL.path))
+                                }
+                            ))
                         }
                     }
                 }

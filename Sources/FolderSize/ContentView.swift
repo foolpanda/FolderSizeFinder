@@ -4,7 +4,8 @@ import AppKit
 struct ContentView: View {
     @ObservedObject var store: ScanStore
     @Environment(\.openWindow) private var openWindow
-    @State private var selection: Node.ID?
+    @State private var selection: Set<Node.ID> = []
+    @State private var primarySelection: Node.ID?
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
 
     var body: some View {
@@ -14,7 +15,7 @@ struct ContentView: View {
         } detail: {
             Group {
                 if let root = store.root {
-                    FolderSplitView(store: store, root: root, selection: $selection)
+                    FolderSplitView(store: store, root: root, selection: $selection, primary: $primarySelection)
                 } else {
                     WelcomeView(store: store)
                 }

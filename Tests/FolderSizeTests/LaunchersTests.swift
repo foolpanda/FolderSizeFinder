@@ -64,4 +64,17 @@ final class LaunchersTests: XCTestCase {
         XCTAssertEqual(LauncherStore.shellQuoted("/plain/path"), "'/plain/path'")
         XCTAssertEqual(LauncherStore.shellQuoted("it's"), "'it'\\''s'")
     }
+
+    func testMultiPathExpansion() {
+        // {paths} 展开为所有选中项(各自转义),{path} 取第一个
+        XCTAssertEqual(
+            LauncherStore.shellLine(directory: "/tmp/dir", paths: ["/tmp/a", "/tmp/b b"],
+                                    command: "bcomp {paths}"),
+            "cd '/tmp/dir' && bcomp '/tmp/a' '/tmp/b b'"
+        )
+        XCTAssertEqual(
+            LauncherStore.expand("diff {path} {paths}", paths: ["/x", "/y"]),
+            "diff '/x' '/x' '/y'"
+        )
+    }
 }

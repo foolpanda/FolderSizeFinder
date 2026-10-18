@@ -15,7 +15,8 @@ struct SearchScope: Codable, Hashable {
 
 /// 索引中的一条记录(文件或目录)
 struct FileRecord: Identifiable, Sendable {
-    let id: Int
+    /// 稳定标识 = 相对路径:后台快照重建后同一文件仍保持选中
+    let id: String
     let relPath: String
     let lowercasedPath: String
     let isDirectory: Bool

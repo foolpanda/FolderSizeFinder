@@ -161,9 +161,9 @@ final class ScanStore: ObservableObject {
                 return
             }
             let agg = ScanStore.aggregate(cached.events)
-            let records = cached.events.enumerated().map { i, ev in
+            let records = cached.events.map { ev in
                 FileRecord(
-                    id: i,
+                    id: ev.path,
                     relPath: ev.path,
                     lowercasedPath: ev.path.lowercased(),
                     isDirectory: ev.isDirectory,
@@ -318,17 +318,15 @@ final class ScanStore: ObservableObject {
 
     private func applyIndexBatch(_ batch: [ScanEvent], generation gen: Int) {
         guard gen == generation, backgroundScan else { return }
-        var nextID = freshIndex.count
         for ev in batch {
             freshIndex.append(FileRecord(
-                id: nextID,
+                id: ev.path,
                 relPath: ev.path,
                 lowercasedPath: ev.path.lowercased(),
                 isDirectory: ev.isDirectory,
                 logical: ev.logical,
                 allocated: ev.allocated
             ))
-            nextID += 1
             if !ev.isDirectory {
                 scannedFiles += 1
                 scannedBytes += ev.allocated
@@ -416,9 +414,9 @@ final class ScanStore: ObservableObject {
         let gen = generation
         Task.detached(priority: .userInitiated) { [weak self] in
             guard let cached = IndexCache.read(url: cacheURL) else { return }
-            let records = cached.events.enumerated().map { i, event in
+            let records = cached.events.map { event in
                 FileRecord(
-                    id: i,
+                    id: event.path,
                     relPath: event.path,
                     lowercasedPath: event.path.lowercased(),
                     isDirectory: event.isDirectory,
@@ -655,7 +653,7 @@ final class ScanStore: ObservableObject {
         for event in events {
             // 全量索引
             index.append(FileRecord(
-                id: index.count,
+                id: event.path,
                 relPath: event.path,
                 lowercasedPath: event.path.lowercased(),
                 isDirectory: event.isDirectory,

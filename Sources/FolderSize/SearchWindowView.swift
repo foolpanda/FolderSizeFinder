@@ -8,6 +8,9 @@ import AppKit
 struct SearchWindowView: View {
     let scope: SearchScope
     @EnvironmentObject var store: ScanStore
+    @EnvironmentObject var launchers: LauncherStore
+    @EnvironmentObject var favorites: FavoritesStore
+    @Environment(\.openWindow) private var openWindow
 
     @State private var query = ""
     @State private var result: [FileRecord] = []
@@ -15,7 +18,7 @@ struct SearchWindowView: View {
     @State private var searchMillis = 0
     @State private var sortKey: SortKey = .name
     @State private var descending = false
-    @State private var selection: FileRecord.ID?
+    @State private var selection: Set<FileRecord.ID> = []
     @State private var searchTask: Task<Void, Never>?
     @State private var showExamples = false
 
@@ -202,10 +205,12 @@ struct SearchWindowView: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .truncationMode(.head)
+                        .contextMenu { rowMenu(rec) }
                 }
                 TableColumn(L.t("col.size")) { rec in
                     Text(rec.isDirectory ? "—" : Format.size(rec.logical))
                         .monospacedDigit()
+                        .contextMenu { rowMenu(rec) }
                 }
                 .width(min: 88, ideal: 94)
             }
@@ -306,23 +311,31 @@ struct SearchWindowView: View {
     }
 
     private func revealSelected() {
-        guard let sel = selection,
-              let rec = result.first(where: { $0.id == sel }),
-              let url = absoluteURL(rec) else { return }
-        NSWorkspace.shared.activateFileViewerSelecting([url])
+        let urls = result.filter { selection.contains($0.id) }.compactMap { absoluteURL($0) }
+        guard !urls.isEmpty else { return }
+        NSWorkspace.shared.activateFileViewerSelecting(urls)
+    }
+
+    /// 右键作用项:点中的行已在多选里则作用于整个多选,否则只作用于该行
+    private func contextRecords(_ rec: FileRecord) -> [FileRecord] {
+        if selection.contains(rec.id), selection.count > 1 {
+            return result.filter { selection.contains($0.id) }
+        }
+        return [rec]
     }
 
     @ViewBuilder
     private func rowMenu(_ rec: FileRecord) -> some View {
-        if let url = absoluteURL(rec) {
-            Button("在 Finder 中显示") {
-                NSWorkspace.shared.activateFileViewerSelecting([url])
-            }
-            Button("拷贝路径") {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(url.path, forType: .string)
-            }
+        let items = contextRecords(rec).compactMap { r -> FileItem? in
+            guard let url = absoluteURL(r) else { return nil }
+            return FileItem(url: url, isDirectory: r.isDirectory)
         }
+        FileMenuContent(entries: FileMenuFactory.searchEntries(
+            items: items, launchers: launchers, favorites: favorites,
+            openImagePreview: { [openWindow] url in
+                openWindow(value: ImagePreviewScope(filePath: url.path))
+            }
+        ))
     }
 }
 

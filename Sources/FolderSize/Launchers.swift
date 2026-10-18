@@ -53,12 +53,30 @@ final class LauncherStore: ObservableObject {
 
     // MARK: 执行
 
-    /// 终端里最终执行的 shell 行:cd 到目录 && 命令({path} 占位替换)
-    static func shellLine(path: String, command: String) -> String {
-        let cd = "cd \(shellQuoted(path))"
+    /// 替换命令模板里的占位符:
+    ///   {paths} → 所有选中项(各自 shell 转义,空格分隔),供比较/批量工具用
+    ///   {path}  → 第一个选中项
+    static func expand(_ template: String, paths: [String]) -> String {
+        var command = template
+        let joined = paths.map(shellQuoted).joined(separator: " ")
+        command = command.replacingOccurrences(of: "{paths}", with: joined)
+        if let first = paths.first {
+            command = command.replacingOccurrences(of: "{path}", with: shellQuoted(first))
+        }
+        return command
+    }
+
+    /// 终端里最终执行的 shell 行:cd 到工作目录 && 命令(占位替换)
+    static func shellLine(directory: String, paths: [String], command: String) -> String {
+        let cd = "cd \(shellQuoted(directory))"
         let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return cd }
-        return cd + " && " + trimmed.replacingOccurrences(of: "{path}", with: shellQuoted(path))
+        return cd + " && " + expand(trimmed, paths: paths)
+    }
+
+    /// 兼容旧调用:单一路径,既当工作目录也当 {path}
+    static func shellLine(path: String, command: String) -> String {
+        shellLine(directory: path, paths: [path], command: command)
     }
 
     static func shellQuoted(_ s: String) -> String {
@@ -75,8 +93,8 @@ final class LauncherStore: ObservableObject {
 
     /// 在 Terminal 新窗口的目录下执行命令(自定义启动器走这里;
     /// 首次使用系统会请求"控制终端"的自动化权限)
-    static func runInTerminal(path: String, command: String) {
-        let line = shellLine(path: path, command: command)
+    static func runInTerminal(directory: String, paths: [String], command: String) {
+        let line = shellLine(directory: directory, paths: paths, command: command)
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
         let source = """
@@ -92,6 +110,11 @@ final class LauncherStore: ObservableObject {
         if let error {
             Diag.log("启动器执行失败: \(error)")
         }
+    }
+
+    /// 兼容旧调用:单一路径
+    static func runInTerminal(path: String, command: String) {
+        runInTerminal(directory: path, paths: [path], command: command)
     }
 }
 

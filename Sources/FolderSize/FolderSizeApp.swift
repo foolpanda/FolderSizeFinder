@@ -51,10 +51,22 @@ struct FolderSizeApp: App {
         WindowGroup(for: SearchScope.self) { $scope in
             SearchWindowView(scope: scope ?? SearchScope(rootPath: "", prefix: "", scopeName: ""))
                 .environmentObject(store)
+                .environmentObject(favorites)
+                .environmentObject(launchers)
                 .environmentObject(settings)
                 .id(settings.language)
         }
         .defaultSize(width: 780, height: 480)
+
+        // 内置图片预览窗口(显示路径 / 上级下级目录跳转 / 复制全路径·父路径)
+        WindowGroup(for: ImagePreviewScope.self) { $scope in
+            if let scope {
+                ImagePreviewWindow(scope: scope)
+                    .environmentObject(settings)
+                    .id(settings.language)
+            }
+        }
+        .defaultSize(width: 900, height: 680)
     }
 
     /// 裸二进制(swift run / .build 直接运行)没有 bundle icns,
